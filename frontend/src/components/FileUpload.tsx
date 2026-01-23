@@ -67,9 +67,27 @@ export const FileUpload: React.FC<FileUploadProps> = ({
 
     return (
         <div className="w-full">
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-                {label}
-            </label>
+            <div className="flex justify-between items-center mb-2">
+                <label className="block text-sm font-medium text-gray-300">
+                    {label}
+                </label>
+                {file && (
+                    <button
+                        onClick={() => document.getElementById(`file-input-${label}`)?.click()}
+                        className="text-xs text-accent-orange hover:text-accent-yellow transition-colors font-medium"
+                    >
+                        Replace
+                    </button>
+                )}
+            </div>
+
+            <input
+                type="file"
+                accept={accept}
+                onChange={handleFileInput}
+                className="hidden"
+                id={`file-input-${label}`}
+            />
 
             {!file ? (
                 <div
@@ -78,7 +96,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                     onDragOver={handleDrag}
                     onDrop={handleDrop}
                     className={`
-            border-2 border-dashed rounded-lg p-8 text-center cursor-pointer
+            border-2 border-dashed rounded-lg p-6 text-center cursor-pointer
             transition-all duration-200
             ${isDragging
                             ? 'border-accent-orange bg-accent-orange/10'
@@ -86,39 +104,33 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                         }
           `}
                 >
-                    <input
-                        type="file"
-                        accept={accept}
-                        onChange={handleFileInput}
-                        className="hidden"
-                        id={`file-input-${label}`}
-                    />
-                    <label htmlFor={`file-input-${label}`} className="cursor-pointer">
-                        <Upload className="w-12 h-12 mx-auto mb-4 text-accent-orange" />
-                        <p className="text-gray-300 mb-2">
-                            Drag & drop your file here, or <span className="text-accent-orange font-semibold">browse</span>
+                    <label htmlFor={`file-input-${label}`} className="cursor-pointer block">
+                        <Upload className="w-8 h-8 mx-auto mb-2 text-accent-orange" />
+                        <p className="text-gray-300 text-sm mb-1">
+                            <span className="text-accent-orange font-semibold">Click to upload</span> or drag and drop
                         </p>
-                        <p className="text-sm text-gray-500">
+                        <p className="text-xs text-gray-500">
                             {accept === '.docx' ? 'Word Document (.docx)' : 'Image (JPG, PNG)'}
                         </p>
                     </label>
                 </div>
             ) : (
-                <div className="card flex items-center justify-between">
-                    <div className="flex items-center space-x-4">
-                        <div className="p-3 bg-accent-orange/20 rounded-lg">
-                            <Icon className="w-6 h-6 text-accent-orange" />
+                <div className="bg-chalkboard-light border border-gray-600 rounded-lg p-3 flex items-center justify-between group">
+                    <div className="flex items-center space-x-3 overflow-hidden">
+                        <div className="p-2 bg-accent-orange/20 rounded-lg flex-shrink-0">
+                            <Icon className="w-5 h-5 text-accent-orange" />
                         </div>
-                        <div>
-                            <p className="font-medium text-gray-100">{file.name}</p>
-                            <p className="text-sm text-gray-400">{formatFileSize(file.size)}</p>
+                        <div className="min-w-0">
+                            <p className="font-medium text-gray-200 text-sm truncate" title={file.name}>{file.name}</p>
+                            <p className="text-xs text-gray-400">{formatFileSize(file.size)}</p>
                         </div>
                     </div>
                     <button
                         onClick={removeFile}
-                        className="p-2 hover:bg-chalkboard-light rounded-lg transition-colors"
+                        className="p-1.5 hover:bg-gray-700 rounded-md transition-colors opacity-0 group-hover:opacity-100"
+                        title="Remove file"
                     >
-                        <X className="w-5 h-5 text-gray-400 hover:text-red-400" />
+                        <X className="w-4 h-4 text-gray-400 hover:text-red-400" />
                     </button>
                 </div>
             )}
