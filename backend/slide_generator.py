@@ -191,5 +191,25 @@ def generate_slide_image(question: Dict, background: Image.Image,
         
         # Next bullet
         bullet_y += (len(body_lines) + 1) * line_spacing
+
+    # === WATERMARK (Bottom Right) ===
+    watermark_text = config.get('watermark_text', '')
+    if watermark_text:
+        # Reuse subtitle font or load new one
+        watermark_font = ImageFont.truetype(font_path, 30) if 'font_path' in locals() else font_subtitle
+        
+        # Calculate size
+        bbox = draw.textbbox((0, 0), watermark_text, font=watermark_font)
+        w_width = bbox[2] - bbox[0]
+        w_height = bbox[3] - bbox[1]
+        
+        # Position at bottom right with margins
+        # 1920 width, 1080 height
+        # Margin right 80, Margin bottom 60
+        wx = 1920 - 80 - w_width
+        wy = 1080 - 60 - w_height
+        
+        # Draw watermark
+        draw.text((wx, wy), watermark_text, font=watermark_font, fill=custom_color)
     
     return bg

@@ -13,6 +13,7 @@ export interface Config {
     font_text_color?: string;
     pos_x?: number;
     pos_y?: number;
+    watermark_text?: string;
 }
 
 export interface ParsedDocxResponse {

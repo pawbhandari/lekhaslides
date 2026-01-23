@@ -1,4 +1,27 @@
+import React, { type ChangeEvent } from 'react';
+import type { Config } from '../types';
 import { ChevronDown, Type, Layout, Palette, PenTool } from 'lucide-react';
+
+interface ConfigPanelProps {
+    config: Config;
+    onChange: (config: Config) => void;
+}
+
+
+const Section = ({ title, icon: Icon, children, defaultOpen = false }: any) => (
+    <details className="group mb-4" open={defaultOpen}>
+        <summary className="flex items-center justify-between cursor-pointer p-4 bg-chalkboard-light rounded-lg hover:bg-gray-700 transition-colors list-none">
+            <div className="flex items-center space-x-3">
+                <Icon className="w-5 h-5 text-accent-yellow" />
+                <span className="font-semibold text-gray-200">{title}</span>
+            </div>
+            <ChevronDown className="w-4 h-4 text-gray-400 transform group-open:rotate-180 transition-transform" />
+        </summary>
+        <div className="p-4 space-y-4 border-l-2 border-gray-700 ml-4 mt-2">
+            {children}
+        </div>
+    </details>
+);
 
 export const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange }) => {
     const handleChange = (field: keyof Config, value: string | number) => {
@@ -12,21 +35,6 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange }) =>
     const handleNumberChange = (field: keyof Config) => (e: ChangeEvent<HTMLInputElement>) => {
         handleChange(field, Number(e.target.value));
     };
-
-    const Section = ({ title, icon: Icon, children, defaultOpen = false }: any) => (
-        <details className="group mb-4" open={defaultOpen}>
-            <summary className="flex items-center justify-between cursor-pointer p-4 bg-chalkboard-light rounded-lg hover:bg-gray-700 transition-colors list-none">
-                <div className="flex items-center space-x-3">
-                    <Icon className="w-5 h-5 text-accent-yellow" />
-                    <span className="font-semibold text-gray-200">{title}</span>
-                </div>
-                <ChevronDown className="w-4 h-4 text-gray-400 transform group-open:rotate-180 transition-transform" />
-            </summary>
-            <div className="p-4 space-y-4 border-l-2 border-gray-700 ml-4 mt-2">
-                {children}
-            </div>
-        </details>
-    );
 
     return (
         <div className="space-y-2 pb-20">
@@ -64,6 +72,16 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange }) =>
                         onChange={handleTextChange('badge_text')}
                         className="input-field mt-1"
                         placeholder="Enter badge text"
+                    />
+                </div>
+                <div>
+                    <label className="text-xs text-gray-400 uppercase font-semibold">Watermark (Bottom Right)</label>
+                    <input
+                        type="text"
+                        value={config.watermark_text || ''}
+                        onChange={handleTextChange('watermark_text')}
+                        className="input-field mt-1"
+                        placeholder="Enter watermark text"
                     />
                 </div>
             </Section>

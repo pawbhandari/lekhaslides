@@ -14,7 +14,8 @@ export const parseDocx = async (file: File): Promise<ParsedDocxResponse> => {
 export const generatePreview = async (
     background: File,
     questionData: Question,
-    config: Config
+    config: Config,
+    signal?: AbortSignal
 ): Promise<string> => {
     const formData = new FormData();
     formData.append('background', background);
@@ -22,7 +23,8 @@ export const generatePreview = async (
     formData.append('config', JSON.stringify(config));
 
     const response = await axios.post(`${API_BASE}/api/generate-preview`, formData, {
-        responseType: 'blob'
+        responseType: 'blob',
+        signal
     });
 
     return URL.createObjectURL(response.data);

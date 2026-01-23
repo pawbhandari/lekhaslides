@@ -12,6 +12,6 @@ echo ""
 
 # Activate virtual environment and run server
 cd "$(dirname "$0")"
-source venv/bin/activate
+source .venv/bin/activate
 cd backend
 uvicorn main:app --reload --host 0.0.0.0 --port 8000

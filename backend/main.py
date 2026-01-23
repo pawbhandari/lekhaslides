@@ -7,7 +7,7 @@ from typing import List
 import json
 
 from slide_generator import generate_slide_image
-from docx_parser import parse_questions_from_docx
+from docx_parser import parse_questions_from_docx, parse_questions_from_md
 from pptx_builder import create_pptx_from_images
 
 app = FastAPI(title="Lekhaslides API")
@@ -24,7 +24,7 @@ app.add_middleware(
 @app.post("/api/parse-docx")
 async def parse_docx(file: UploadFile = File(...)):
     """
-    Parse .docx file and return structured questions
+    Parse .docx or .md/.txt file and return structured questions
     
     Returns: 
     {
@@ -42,8 +42,22 @@ async def parse_docx(file: UploadFile = File(...)):
     }
     """
     try:
+        filename = file.filename.lower()
+        if filename.endswith('.gdoc'):
+             raise HTTPException(status_code=400, detail="Google Docs shortcut files (.gdoc) cannot be processed directly. Please open the document in Google Docs, go to File > Download > Microsoft Word (.docx), and upload that file.")
+
         content = await file.read()
-        questions = parse_questions_from_docx(content)
+        
+        if filename.endswith('.md') or filename.endswith('.txt'):
+            try:
+                text_content = content.decode('utf-8')
+            except UnicodeDecodeError:
+                text_content = content.decode('latin-1')
+            
+            questions = parse_questions_from_md(text_content)
+        else:
+            # Default to docx
+            questions = parse_questions_from_docx(content)
         
         return {
             "questions": questions,

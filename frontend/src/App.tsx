@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import toast, { Toaster } from 'react-hot-toast';
 import { FileUpload } from './components/FileUpload';
 import { ConfigPanel } from './components/ConfigPanel';
-import { PreviewCard } from './components/PreviewCard';
+
 import { ProgressBar } from './components/ProgressBar';
 import { DownloadButton } from './components/DownloadButton';
 import { parseDocx, generatePreview, generatePPTX, downloadBlob } from './services/api';
@@ -25,7 +25,8 @@ function App() {
     font_size_body: 28,
     font_text_color: '#F0C83C',
     pos_x: 0,
-    pos_y: 0
+    pos_y: 0,
+    watermark_text: ''
   });
 
   // Questions and preview
@@ -35,6 +36,7 @@ function App() {
   // Generation state
   const [appState, setAppState] = useState<AppState>('upload');
   const [generatedBlob, setGeneratedBlob] = useState<Blob | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
   // Handle file uploads and generate preview
   const handleFilesUploaded = async () => {
@@ -67,9 +69,10 @@ function App() {
       setPreviewUrl(previewImageUrl);
       toast.success('Preview ready!', { id: 'preview' });
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error processing files:', error);
-      toast.error('Failed to process files. Please try again.', { id: 'parse' });
+      const msg = error.response?.data?.detail || 'Failed to process files. Please try again.';
+      toast.error(msg, { id: 'parse', duration: 5000 });
       setAppState('upload');
     }
   };
@@ -113,6 +116,46 @@ function App() {
     setAppState('upload');
     toast.success('Ready to create new slides!');
   };
+
+  // Real-time preview update when config changes
+  // Real-time preview update when config changes
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const updatePreview = async () => {
+      // Only process if we have the necessary data and start state
+      if (!backgroundFile || !docxFile || questions.length === 0) return;
+
+      console.log('Fetching new preview...');
+      setIsPreviewLoading(true);
+      try {
+        const previewImageUrl = await generatePreview(
+          backgroundFile,
+          questions[0],
+          config,
+          controller.signal
+        );
+        console.log('Preview updated');
+        setPreviewUrl(previewImageUrl);
+      } catch (error: any) {
+        if (error.name === 'CanceledError' || error.name === 'AbortError') {
+          return;
+        }
+        console.error('Error updating preview:', error);
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsPreviewLoading(false);
+        }
+      }
+    };
+
+    // Debounce to prevent flashing/spamming
+    const timer = setTimeout(updatePreview, 200);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [config]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Check if ready to generate preview
   const canGeneratePreview = backgroundFile && docxFile && appState === 'upload';
@@ -159,8 +202,8 @@ function App() {
               />
               <div className="w-full h-px bg-white/5"></div>
               <FileUpload
-                label="Questions (.docx)"
-                accept=".docx"
+                label="Questions (.docx, .md, .txt)"
+                accept=".docx,.md,.txt,.gdoc"
                 onFileSelect={setDocxFile}
                 file={docxFile}
                 icon="document"
@@ -245,6 +288,11 @@ function App() {
                 <div className="rounded-xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-white/5 relative z-10 bg-[#1a1f2e]">
                   {/* Aspect Ratio Box 16:9 */}
                   <div className="aspect-video relative">
+                    {isPreviewLoading && (
+                      <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-[2px] transition-all duration-200">
+                        <RefreshCw className="w-8 h-8 text-accent-yellow animate-spin" />
+                      </div>
+                    )}
                     <img
                       src={previewUrl}
                       alt="Slide Preview"

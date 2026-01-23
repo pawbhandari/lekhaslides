@@ -1,6 +1,16 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  --color-chalkboard-dark: #1a1f2e;
+  --color-chalkboard: #2a3447;
+  --color-chalkboard-light: #3d4b65;
+
+  --color-accent-yellow: #f0c83c;
+  --color-accent-orange: #ffb450;
+  --color-accent-mint: #64dcb4;
+
+  --font-sans: Inter, system-ui, sans-serif;
+}
 
 @layer base {
   body {
@@ -19,7 +29,7 @@
 
   /* Modern Gradient Button */
   .btn-primary {
-    @apply relative overflow-hidden bg-gradient-to-r from-accent-orange to-accent-yellow text-chalkboard-dark font-bold py-4 px-8 rounded-xl shadow-[0_0_20px_rgba(240, 200, 60, 0.3)] hover:shadow-[0_0_30px_rgba(240, 200, 60, 0.5)] transition-all duration-300 transform hover:-translate-y-1 active:translate-y-0 active:scale-95 flex items-center justify-center space-x-2 isolate;
+    @apply relative overflow-hidden bg-gradient-to-r from-accent-orange to-accent-yellow text-chalkboard-dark font-bold py-4 px-8 rounded-xl shadow-[0_0_20px_#F0C83C4D] hover:shadow-[0_0_30px_#F0C83C80] transition-all duration-300 transform hover:-translate-y-1 active:translate-y-0 active:scale-95 flex items-center justify-center space-x-2 isolate;
   }
 
   .btn-primary::after {
