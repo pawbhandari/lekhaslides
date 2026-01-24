@@ -4,15 +4,22 @@ import os
 from typing import Dict, List, Tuple
 from functools import lru_cache
 
+import threading
+
+# Global locks
+_font_lock = threading.Lock()
+_bg_lock = threading.Lock()
+
 # Global font cache
 _font_cache: Dict[Tuple[str, int], ImageFont.FreeTypeFont] = {}
 
 def get_cached_font(font_path: str, size: int) -> ImageFont.FreeTypeFont:
     """Get font from cache or load it"""
     key = (font_path, size)
-    if key not in _font_cache:
-        _font_cache[key] = ImageFont.truetype(font_path, size)
-    return _font_cache[key]
+    with _font_lock:
+        if key not in _font_cache:
+            _font_cache[key] = ImageFont.truetype(font_path, size)
+        return _font_cache[key]
 
 # Cache for resized backgrounds
 _bg_cache: Dict[Tuple[int, int, int], Image.Image] = {}
@@ -24,16 +31,30 @@ def get_resized_background(background: Image.Image, width: int, height: int, bg_
         return background.resize((width, height), resample).convert("RGB")
 
     key = (bg_id, width, height)
-    if key not in _bg_cache:
-        resample = Image.Resampling.BILINEAR if width < 1920 else Image.Resampling.LANCZOS
-        _bg_cache[key] = background.resize((width, height), resample).convert("RGB")
-    return _bg_cache[key].copy()
+    with _bg_lock:
+        if key not in _bg_cache:
+            resample = Image.Resampling.BILINEAR if width < 1920 else Image.Resampling.LANCZOS
+            _bg_cache[key] = background.resize((width, height), resample).convert("RGB")
+        return _bg_cache[key].copy()
+
+def compress_image(image: Image.Image, max_dimension: int = 1920) -> Image.Image:
+    """
+    Aggressively compress/resize large images to save memory before processing.
+    """
+    if max(image.size) > max_dimension:
+        ratio = max_dimension / max(image.size)
+        new_size = (int(image.width * ratio), int(image.height * ratio))
+        print(f"📉 Downscaling background from {image.size} to {new_size} for memory optimization")
+        return image.resize(new_size, Image.Resampling.LANCZOS)
+    return image
 
 def clear_caches():
     """Clear all caches - call this between different generation sessions"""
     global _font_cache, _bg_cache
-    _font_cache.clear()
-    _bg_cache.clear()
+    with _font_lock:
+        _font_cache.clear()
+    with _bg_lock:
+        _bg_cache.clear()
 
 def draw_rotated_text(img, text, font, fill_color, x, y, angle):
     """Draw text rotated around its center (CSS-style CW rotation match)"""

@@ -90,13 +90,22 @@ pip install -r requirements.txt
 
 The Caveat-Bold font is already downloaded in `backend/fonts/`
 
-### 4. Run Backend Only
+### 4. Run Backend
 
+**Option A: Local Development (macOS/Windows)**
+Use the stable `uvicorn` server (prevents macOS fork crashes):
 ```bash
 ./start-backend.sh
-# OR
-cd backend
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+# OR manually:
+# cd backend && uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+**Option B: Production Deployment (Linux)**
+Use `gunicorn` for robustness and performance:
+```bash
+# In Linux environment:
+export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES # Optional on Linux
+gunicorn -c gunicorn_conf.py main:app
 ```
 
 ---
@@ -307,7 +316,14 @@ Test the API using the interactive docs at http://localhost:8000/docs
 
 ## Changelog
 
-### v2.1 (January 24, 2026) - Stability Update
+### v2.2 (January 24, 2026) - Production Hardening & Crash Fixes
+- ✅ **Fix**: Resolved `SIGABRT` crashes on macOS by reverting local dev to `uvicorn`.
+- ✅ **Fix**: Added `compress_image()` to automatically downscale 4K/8K images to 1080p, preventing memory crashes.
+- ✅ **Security**: Added restrictive CORS and payload size limits (10MB).
+- ✅ **Infrastructure**: Added `gunicorn` configuration for Linux production deployments.
+- ✅ **Thread Safety**: Added locks to all global image/font caches.
+
+### v2.1 (January 24, 2026) - Initial Stability Update
 - ✅ **Fix**: Resolved backend crash when rendering rotated text/badges
 - ✅ **Fix**: Fixed background image caching issue (previews now update correctly)
 - ✅ **Improvement**: Added support for truncated/incomplete image files

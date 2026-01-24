@@ -23,3 +23,5 @@ backend/*.pyc
 
 # Local data
 *.log
+*_log.txt
+startup_log.txt

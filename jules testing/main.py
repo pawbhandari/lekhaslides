@@ -1,5 +1,4 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-import os
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from PIL import Image, ImageFile, UnidentifiedImageError
@@ -8,7 +7,7 @@ import io
 from typing import List
 import json
 
-from slide_generator import generate_slide_image, compress_image
+from slide_generator import generate_slide_image
 from docx_parser import parse_questions_from_docx, parse_questions_from_md
 from pptx_builder import create_pptx_from_images
 
@@ -40,32 +39,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 # CORS for React frontend
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=["*"],  # Adjust for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Middleware to limit file size (approximate, via Content-Length)
-@app.middleware("http")
-async def limit_upload_size(request: Request, call_next):
-    # Max size: 10MB for images, 5MB for docs
-    MAX_SIZE = 10 * 1024 * 1024 
-    
-    if request.method == "POST":
-        content_length = request.headers.get("content-length")
-        if content_length and int(content_length) > MAX_SIZE:
-             return JSONResponse(
-                status_code=413,
-                content={"detail": "File too large. Maximum size is 10MB."},
-            )
-            
-    response = await call_next(request)
-    return response
 
 @app.post("/api/parse-docx")
 async def parse_docx(file: UploadFile = File(...)):
@@ -160,8 +140,6 @@ async def generate_preview(
         print("📁 Loading background image...")
         bg_bytes = await background.read()
         bg_image = Image.open(io.BytesIO(bg_bytes))
-        bg_image.load()  # Ensure image data is in memory
-        bg_image = compress_image(bg_image) # Compress if too large
         print(f"✓ Background loaded: {bg_image.size}")
         
         # Parse JSON data
@@ -229,10 +207,8 @@ async def generate_pptx(
     
     async def generate_with_progress():
         try:
-            # Load background and ensure it's in memory
+            # Load background
             bg_image = Image.open(io.BytesIO(bg_content))
-            bg_image.load()  # Crucial: Load pixel data into memory before threading
-            bg_image = compress_image(bg_image) # Compress if too large
             bg_id = id(bg_image)  # Unique ID for caching
             
             # Parse data

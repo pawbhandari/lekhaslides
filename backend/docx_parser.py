@@ -47,12 +47,15 @@ def parse_lines(lines_iterator) -> List[Dict]:
         text = text.strip()
         if not text:
             continue
-            
         # Clean artifacts for question detection
         clean_text = clean_markdown_artifacts(text)
         
-        # Check for Question
-        match = re.match(r'^(\d+)\.?\s*(.+)', clean_text)
+        # Check for Question (Flexible regex: 1., 1), 1:, Question 1:, etc.)
+        match = re.match(r'^(?:Question\s*)?(\d+)\s*[:.\)]\s*(.+)', clean_text, re.IGNORECASE)
+        # Fallback for just digit at start if it's short or follows a pattern
+        if not match:
+            match = re.match(r'^(\d+)\.?\s+(.+)', clean_text)
+            
         if match:
             if current_q:
                 questions.append(current_q)
@@ -112,9 +115,30 @@ def fast_parse_xml(file_content: bytes) -> List[Dict]:
     print(f"Processing {len(paragraphs)} paragraphs via XML...")
 
     def xml_lines_generator():
+        auto_num_counter = 1
         for p in paragraphs:
+            # Check for numbering properties (auto-numbering)
+            num_pr = p.find('w:pPr/w:numPr', ns)
+            is_auto_numbered = num_pr is not None
+            ilvl = "0"
+            if is_auto_numbered:
+                ilvl_node = num_pr.find('w:ilvl', ns)
+                if ilvl_node is not None:
+                    ilvl = ilvl_node.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', "0")
+
             texts = [t.text for t in p.iterfind('.//w:t', ns) if t.text]
-            yield ''.join(texts)
+            full_text = ''.join(texts).strip()
+            
+            if not full_text:
+                continue
+                
+            # If it's auto-numbered at level 0 and doesn't already start with a number
+            # prepend a number so the parser identifies it as a question
+            if is_auto_numbered and ilvl == "0" and not re.match(r'^\d+', full_text):
+                full_text = f"{auto_num_counter}. {full_text}"
+                auto_num_counter += 1
+            
+            yield full_text
 
     return parse_lines(xml_lines_generator())
 
@@ -125,5 +149,29 @@ def slow_parse_fallback(file_content: bytes) -> List[Dict]:
     doc = Document(io.BytesIO(file_content))
     print(f"📄 FALLBACK PARSING DOCX - Found {len(doc.paragraphs)} paragraphs")
     
-    return parse_lines((p.text for p in doc.paragraphs))
+    def slow_lines_generator():
+        auto_num_counter = 1
+        for p in doc.paragraphs:
+            text = p.text.strip()
+            if not text:
+                continue
+            
+            # Detect auto-numbering in python-docx
+            is_auto_numbered = False
+            ilvl = 0
+            try:
+                if p._element.pPr is not None and p._element.pPr.numPr is not None:
+                    is_auto_numbered = True
+                    if p._element.pPr.numPr.ilvl is not None:
+                        ilvl = p._element.pPr.numPr.ilvl.val
+            except AttributeError:
+                pass
+            
+            if is_auto_numbered and ilvl == 0 and not re.match(r'^\d+', text):
+                text = f"{auto_num_counter}. {text}"
+                auto_num_counter += 1
+            
+            yield text
+
+    return parse_lines(slow_lines_generator())
 
