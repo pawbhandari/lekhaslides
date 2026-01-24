@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from PIL import Image, ImageFile
+from PIL import Image, ImageFile, UnidentifiedImageError
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 import io
 from typing import List
@@ -165,6 +165,10 @@ async def generate_preview(
         print(f"{'='*60}\n")
         
         return StreamingResponse(img_byte_arr, media_type="image/png")
+
+    except UnidentifiedImageError:
+        print("❌ ERROR: Invalid image file")
+        raise HTTPException(status_code=400, detail="Invalid image file. Please upload a valid JPG or PNG.")
         
     except Exception as e:
         print(f"❌ ERROR generating preview: {str(e)}")
@@ -252,6 +256,10 @@ async def generate_pptx(
             from slide_generator import clear_caches
             clear_caches()
             
+        except UnidentifiedImageError:
+            print("❌ ERROR: Invalid image file")
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Invalid image file. Please upload a valid JPG or PNG.'})}\n\n"
+
         except Exception as e:
             print(f"❌ ERROR generating PPTX: {str(e)}")
             import traceback
