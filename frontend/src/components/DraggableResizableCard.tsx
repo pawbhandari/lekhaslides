@@ -1,7 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { ColorPickerToolbar } from './ColorPickerToolbar';
-import { RefreshCw } from 'lucide-react'; // Icon for rotate? Or just a dot. 
-
 interface DraggableResizableCardProps {
     id: string;
     text: string;
@@ -12,11 +10,8 @@ interface DraggableResizableCardProps {
     rotation: number;
     fontFamily: string;
     backgroundColor?: string;
-    isBadge?: boolean;
-
     containerScale: number;
     isSelected: boolean;
-
     onSelect: () => void;
     onChange: (attrs: { x: number; y: number; fontSize: number; rotation: number }) => void;
     onColorChange: (color: string) => void;
@@ -32,7 +27,6 @@ export const DraggableResizableCard: React.FC<DraggableResizableCardProps> = ({
     rotation,
     fontFamily,
     backgroundColor,
-    isBadge,
     containerScale,
     isSelected,
     onSelect,
@@ -169,6 +163,7 @@ export const DraggableResizableCard: React.FC<DraggableResizableCardProps> = ({
     return (
         <div
             ref={cardRef}
+            id={id}
             className={`absolute group select-none ${isSelected ? 'z-50' : 'z-30'}`}
             style={{
                 left: displayX,

@@ -1,7 +1,8 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from PIL import Image
+from PIL import Image, ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 import io
 from typing import List
 import json
@@ -152,7 +153,7 @@ async def generate_preview(
         
         # Generate slide
         print("🎨 Generating slide image...")
-        slide_img = generate_slide_image(question, bg_image, cfg, preview_mode=True)
+        slide_img = generate_slide_image(question, bg_image, cfg, preview_mode=True, use_cache=False)
         print(f"✓ Slide generated: {slide_img.size}")
         
         # Convert to bytes

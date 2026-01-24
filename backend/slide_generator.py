@@ -1,4 +1,5 @@
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 import os
 from typing import Dict, List, Tuple
 from functools import lru_cache
@@ -16,8 +17,12 @@ def get_cached_font(font_path: str, size: int) -> ImageFont.FreeTypeFont:
 # Cache for resized backgrounds
 _bg_cache: Dict[Tuple[int, int, int], Image.Image] = {}
 
-def get_resized_background(background: Image.Image, width: int, height: int, bg_id: int) -> Image.Image:
+def get_resized_background(background: Image.Image, width: int, height: int, bg_id: int, use_cache: bool = True) -> Image.Image:
     """Cache resized backgrounds to avoid re-resizing for every slide"""
+    if not use_cache:
+        resample = Image.Resampling.BILINEAR if width < 1920 else Image.Resampling.LANCZOS
+        return background.resize((width, height), resample).convert("RGB")
+
     key = (bg_id, width, height)
     if key not in _bg_cache:
         resample = Image.Resampling.BILINEAR if width < 1920 else Image.Resampling.LANCZOS
@@ -133,7 +138,7 @@ def wrap_text(text: str, max_width: int, font: ImageFont.FreeTypeFont,
 
 def generate_slide_image(question: Dict, background: Image.Image, 
                          config: Dict, preview_mode: bool = False,
-                         bg_id: int = 0) -> Image.Image:
+                         bg_id: int = 0, use_cache: bool = True) -> Image.Image:
     """
     Generate slide with text overlay on background
     
@@ -156,7 +161,7 @@ def generate_slide_image(question: Dict, background: Image.Image,
     scale = 0.5 if preview_mode else 1.0
 
     # Use cached resized background
-    bg = get_resized_background(background, TARGET_WIDTH, TARGET_HEIGHT, bg_id)
+    bg = get_resized_background(background, TARGET_WIDTH, TARGET_HEIGHT, bg_id, use_cache=use_cache)
     draw = ImageDraw.Draw(bg, "RGBA")
     
     # Configurable Layout Parameters (scaled)
@@ -257,7 +262,7 @@ def generate_slide_image(question: Dict, background: Image.Image,
 
         r_val = config.get('instructor_rotation')
         ins_rotation = float(r_val) if r_val is not None else 0.0
-        draw_rotated_text(img, config['instructor_name'], ins_font, fill, ins_x, ins_y, ins_rotation)
+        draw_rotated_text(bg, config['instructor_name'], ins_font, fill, ins_x, ins_y, ins_rotation)
     
     # Subtitle (below name)
     should_render_subtitle = config.get('render_subtitle', True)
@@ -275,7 +280,7 @@ def generate_slide_image(question: Dict, background: Image.Image,
         
         r_val = config.get('subtitle_rotation')
         sub_rotation = float(r_val) if r_val is not None else 0.0
-        draw_rotated_text(img, config['subtitle'], sub_font, sub_color, sub_x, sub_y, sub_rotation)
+        draw_rotated_text(bg, config['subtitle'], sub_font, sub_color, sub_x, sub_y, sub_rotation)
 
     
     # Badge (Positioned)
@@ -308,7 +313,7 @@ def generate_slide_image(question: Dict, background: Image.Image,
         else:
             badge_font = font_subtitle
 
-        draw_rotated_badge(img, config['badge_text'], badge_font, badge_bg, badge_fg, badge_x, badge_y, badge_width, badge_height, badge_rotation)
+        draw_rotated_badge(bg, config['badge_text'], badge_font, badge_bg, badge_fg, badge_x, badge_y, badge_width, badge_height, badge_rotation)
     
     # === QUESTION ===
 

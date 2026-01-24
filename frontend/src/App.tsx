@@ -456,7 +456,7 @@ function App() {
                         color={config.instructor_color || '#F0C83C'}
                         rotation={config.instructor_rotation || 0}
                         fontFamily={config.font_family || 'Chalk'}
-                        isBadge={false}
+
                         containerScale={containerScale}
                         isSelected={selectedCard === 'instructor'}
                         onSelect={() => setSelectedCard('instructor')}
@@ -476,7 +476,7 @@ function App() {
                         color={config.subtitle_color || '#64DCB4'}
                         rotation={config.subtitle_rotation || 0}
                         fontFamily={config.font_family || 'Chalk'}
-                        isBadge={false}
+
                         containerScale={containerScale}
                         isSelected={selectedCard === 'subtitle'}
                         onSelect={() => setSelectedCard('subtitle')}
@@ -497,7 +497,7 @@ function App() {
                         rotation={config.badge_rotation !== undefined ? config.badge_rotation : -2}
                         fontFamily={config.font_family || 'Chalk'}
                         backgroundColor={config.badge_bg_color || '#FFB450'}
-                        isBadge={true}
+
                         containerScale={containerScale}
                         isSelected={selectedCard === 'badge'}
                         onSelect={() => setSelectedCard('badge')}
