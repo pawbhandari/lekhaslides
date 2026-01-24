@@ -1,6 +1,34 @@
 from PIL import Image, ImageDraw, ImageFont
 import os
 from typing import Dict, List, Tuple
+from functools import lru_cache
+
+# Global font cache
+_font_cache: Dict[Tuple[str, int], ImageFont.FreeTypeFont] = {}
+
+def get_cached_font(font_path: str, size: int) -> ImageFont.FreeTypeFont:
+    """Get font from cache or load it"""
+    key = (font_path, size)
+    if key not in _font_cache:
+        _font_cache[key] = ImageFont.truetype(font_path, size)
+    return _font_cache[key]
+
+# Cache for resized backgrounds
+_bg_cache: Dict[Tuple[int, int, int], Image.Image] = {}
+
+def get_resized_background(background: Image.Image, width: int, height: int, bg_id: int) -> Image.Image:
+    """Cache resized backgrounds to avoid re-resizing for every slide"""
+    key = (bg_id, width, height)
+    if key not in _bg_cache:
+        resample = Image.Resampling.BILINEAR if width < 1920 else Image.Resampling.LANCZOS
+        _bg_cache[key] = background.resize((width, height), resample).convert("RGB")
+    return _bg_cache[key].copy()
+
+def clear_caches():
+    """Clear all caches - call this between different generation sessions"""
+    global _font_cache, _bg_cache
+    _font_cache.clear()
+    _bg_cache.clear()
 
 def wrap_text(text: str, max_width: int, font: ImageFont.FreeTypeFont, 
               draw: ImageDraw.ImageDraw) -> List[str]:
@@ -25,59 +53,66 @@ def wrap_text(text: str, max_width: int, font: ImageFont.FreeTypeFont,
 
 
 def generate_slide_image(question: Dict, background: Image.Image, 
-                         config: Dict) -> Image.Image:
+                         config: Dict, preview_mode: bool = False,
+                         bg_id: int = 0) -> Image.Image:
     """
     Generate slide with text overlay on background
     
     Args:
         question: {"number": 1, "question": "...", "pointers": [["Label:", "text"], ...]}
         background: PIL Image
-        config: {
-            "instructor_name": str, 
-            "subtitle": str, 
-            "badge_text": str,
-            "font_size_heading": int,
-            "font_size_body": int,
-            "font_text_color": str,
-            "pos_x": int,
-            "pos_y": int
-        }
+        config: {...}
+        preview_mode: If True, generates a lower resolution image for faster feedback.
+        bg_id: Unique ID for background caching (use id(background) or hash)
     
     Returns:
-        PIL Image (1920x1080)
+        PIL Image (1920x1080 or 960x540)
     """
     
-    # Resize background to 16:9 (1920x1080) with high quality
-    bg = background.resize((1920, 1080), Image.Resampling.LANCZOS).convert("RGB")
+    # Resolution settings
+    TARGET_WIDTH = 960 if preview_mode else 1920
+    TARGET_HEIGHT = 540 if preview_mode else 1080
     
-    # Optional: Compress in memory if needed (not strictly necessary for drawing, 
-    # but good practice if we were saving repeatedly. For drawing, we keep full quality in memory).
-    
+    # Scale factor for coordinates and fonts
+    scale = 0.5 if preview_mode else 1.0
+
+    # Use cached resized background
+    bg = get_resized_background(background, TARGET_WIDTH, TARGET_HEIGHT, bg_id)
     draw = ImageDraw.Draw(bg, "RGBA")
     
-    # Configurable Layout Parameters
-    FONT_SIZE_HEADING = int(config.get('font_size_heading', 60))
-    FONT_SIZE_BODY = int(config.get('font_size_body', 28))
-    TEXT_COLOR = config.get('font_text_color', '#F0C83C') # Default Yellow
-    POS_OFFSET_X = int(config.get('pos_x', 0))
-    POS_OFFSET_Y = int(config.get('pos_y', 0))
+    # Configurable Layout Parameters (scaled)
+    FONT_SIZE_HEADING = int(int(config.get('font_size_heading', 60)) * scale)
+    FONT_SIZE_BODY = int(int(config.get('font_size_body', 28)) * scale)
+    TEXT_COLOR = config.get('font_text_color', '#F0C83C') 
+    POS_OFFSET_X = int(int(config.get('pos_x', 0)) * scale)
+    POS_OFFSET_Y = int(int(config.get('pos_y', 0)) * scale)
 
-    # Load fonts with fallback
+    # Font mapping - All handwriting fonts for chalkboard style
+    FONTS = {
+        'Chalk': 'PatrickHand-Regular.ttf',      # Original chalk-style
+        'Casual': 'Caveat-Regular.ttf',          # Casual flowing handwriting
+        'Playful': 'IndieFlower-Regular.ttf',    # Fun playful handwriting
+        'Natural': 'Kalam-Regular.ttf'           # Natural pen-style handwriting
+    }
+    
+    selected_font = config.get('font_family', 'Chalk')
+    font_filename = FONTS.get(selected_font, 'PatrickHand-Regular.ttf')
+
+    # Load fonts with caching
     try:
-        # PWD should be /Users/rci/Documents/lekhaslides/backend or similar
-        # We try to find the font in logical places
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        font_path = os.path.join(base_dir, "fonts", "PatrickHand-Regular.ttf")
+        font_path = os.path.join(base_dir, "fonts", font_filename)
         
         if not os.path.exists(font_path):
-             # Fallback to system font if Patrick Hand isn't there
+             # Fallback to system font if file isn't there
             font_path = "/System/Library/Fonts/Supplemental/Chalkboard.ttc"
             
-        font_heading = ImageFont.truetype(font_path, FONT_SIZE_HEADING)
-        font_subtitle = ImageFont.truetype(font_path, int(FONT_SIZE_HEADING * 0.5)) # subtitle relative to heading
-        font_question = ImageFont.truetype(font_path, int(FONT_SIZE_HEADING * 0.8)) # question slightly smaller
-        font_bullet = ImageFont.truetype(font_path, FONT_SIZE_BODY)
-        font_label = ImageFont.truetype(font_path, int(FONT_SIZE_BODY * 1.1)) # label slightly larger
+        # Use cached fonts - much faster than loading each time
+        font_heading = get_cached_font(font_path, FONT_SIZE_HEADING)
+        font_subtitle = get_cached_font(font_path, int(FONT_SIZE_HEADING * 0.5))
+        font_question = get_cached_font(font_path, int(FONT_SIZE_HEADING * 0.8))
+        font_bullet = get_cached_font(font_path, FONT_SIZE_BODY)
+        font_label = get_cached_font(font_path, int(FONT_SIZE_BODY * 1.1))
         
     except Exception as e:
         print(f"⚠️ Could not load custom/system font: {e}")
@@ -103,11 +138,16 @@ def generate_slide_image(question: Dict, background: Image.Image,
             custom_color = YELLOW
     except:
         custom_color = YELLOW
+        
+    # Standard margins (scaled)
+    BASE_MARGIN_LEFT = 80 * scale
+    BASE_MARGIN_TOP = 60 * scale
+    SAFE_MARGIN_RIGHT = 80 * scale
 
     # Margins
-    margin_left = 80 + POS_OFFSET_X
-    margin_top = 60 + POS_OFFSET_Y
-    width_limit = 1920 - 80 # Just a safe right boundary
+    margin_left = BASE_MARGIN_LEFT + POS_OFFSET_X
+    margin_top = BASE_MARGIN_TOP + POS_OFFSET_Y
+    width_limit = TARGET_WIDTH - SAFE_MARGIN_RIGHT
     
     # Wrap width calculation
     # available width = total width - left margin - right margin
@@ -116,37 +156,56 @@ def generate_slide_image(question: Dict, background: Image.Image,
     
     # === HEADER ===
     # Instructor name (top-left)
-    draw.text((margin_left, margin_top), config.get('instructor_name', ''), 
-              font=font_heading, fill=custom_color)
+    if config.get('instructor_name'):
+        draw.text((margin_left, margin_top), config['instructor_name'], 
+                  font=font_heading, fill=custom_color)
     
     # Subtitle (below name)
-    draw.text((margin_left, margin_top + FONT_SIZE_HEADING + 10), config.get('subtitle', ''),
-              font=font_subtitle, fill=MINT_GREEN)
+    if config.get('subtitle'):
+        draw.text((margin_left, margin_top + FONT_SIZE_HEADING + 10 * scale), config['subtitle'],
+                  font=font_subtitle, fill=MINT_GREEN)
     
-    # Badge (top-right) - fixed position usually, but let's move it with Y offset maybe? 
-    # Or keep it static. Let's keep badge static X but moving Y to align with header row.
-    badge_width = 350
-    badge_height = 70
-    badge_x = 1920 - 80 - badge_width # Fixed right margin
-    badge_y = margin_top 
+    # Badge (Positioned)
+    # Check if we should render badge (default True, can be disabled for frontend overlay)
+    should_render_badge = config.get('render_badge', True)
     
-    # Draw rounded rectangle for badge
-    draw.rounded_rectangle(
-        [(badge_x, badge_y), (badge_x + badge_width, badge_y + badge_height)],
-        radius=10,
-        fill=ORANGE,
-        outline=DARK,
-        width=3
-    )
-    
-    # Badge text (centered)
-    badge_font = ImageFont.truetype(font_path, 24) if 'font_path' in locals() else font_subtitle
-    draw.text((badge_x + badge_width//2, badge_y + badge_height//2),
-              config.get('badge_text', ''), font=badge_font, fill=DARK, anchor="mm")
+    if config.get('badge_text') and should_render_badge:
+        badge_width = 350 * scale
+        badge_height = 70 * scale
+        
+        # Default top-right, but allow override
+        default_badge_x = TARGET_WIDTH - SAFE_MARGIN_RIGHT - badge_width
+        default_badge_y = margin_top
+        
+        # Use config coordinates if provided (scaled)
+        # We expect coordinates in 1920x1080 space from frontend
+        if 'badge_x' in config:
+             badge_x = int(config['badge_x']) * scale
+        else:
+             badge_x = default_badge_x
+             
+        if 'badge_y' in config:
+             badge_y = int(config['badge_y']) * scale
+        else:
+             badge_y = default_badge_y
+        
+        # Draw rounded rectangle for badge
+        draw.rounded_rectangle(
+            [(badge_x, badge_y), (badge_x + badge_width, badge_y + badge_height)],
+            radius=10 * scale,
+            fill=ORANGE,
+            outline=DARK,
+            width=int(3 * scale) or 1
+        )
+        
+        # Badge text (centered)
+        badge_font = ImageFont.truetype(font_path, int(24 * scale)) if 'font_path' in locals() else font_subtitle
+        draw.text((badge_x + badge_width//2, badge_y + badge_height//2),
+                  config['badge_text'], font=badge_font, fill=DARK, anchor="mm")
     
     # === QUESTION ===
     # Position question below header (approx 200px gap in original, let's make it relative)
-    question_y = margin_top + FONT_SIZE_HEADING + 100 
+    question_y = margin_top + FONT_SIZE_HEADING + 100 * scale
     question_text = f"Ques {question['number']} => {question['question']}"
     question_lines = wrap_text(question_text, content_width, font_question, draw)
     
@@ -155,14 +214,18 @@ def generate_slide_image(question: Dict, background: Image.Image,
                   font=font_question, fill=ORANGE)
     
     # === ANSWER LABEL ===
-    answer_y = question_y + len(question_lines) * (font_question.size * 1.2) + 40
+    answer_y = question_y + len(question_lines) * (font_question.size * 1.2) + 40 * scale
     draw.text((margin_left, answer_y), "Answer –", font=font_bullet, fill=WHITE)
     
     # === BULLET POINTS ===
     bullet_y = answer_y + (font_bullet.size * 1.5)
-    bullet_indent = 40
-    line_spacing = font_bullet.size * 1.5
+    bullet_indent = 40 * scale
+    line_spacing = font_bullet.size * 1.3
     
+    # Extra spacing between pointers (configurable)
+    # Default 0, allow 0-100 pixels extra (scaled)
+    pointer_spacing = int(int(config.get('pointer_spacing', 0)) * scale)
+
     for label, text in question['pointers']:
         # Bullet marker
         draw.text((margin_left, bullet_y), "•", font=font_bullet, fill=WHITE)
@@ -176,8 +239,8 @@ def generate_slide_image(question: Dict, background: Image.Image,
         label_width = label_bbox[2] - label_bbox[0]
         
         # Body text (wrapped)
-        body_x = label_x + label_width + 10
-        available_width = 1920 - 80 - body_x
+        body_x = label_x + label_width + 10 * scale
+        available_width = TARGET_WIDTH - SAFE_MARGIN_RIGHT - body_x
         body_lines = wrap_text(text, available_width, font_bullet, draw)
         
         # First line on same line as label
@@ -190,13 +253,15 @@ def generate_slide_image(question: Dict, background: Image.Image,
                       font=font_bullet, fill=WHITE)
         
         # Next bullet
-        bullet_y += (len(body_lines) + 1) * line_spacing
+        # Base height is (lines + 1) * single_spacing
+        # Add dynamic pointer_spacing
+        bullet_y += (len(body_lines) + 1) * line_spacing + pointer_spacing
 
     # === WATERMARK (Bottom Right) ===
     watermark_text = config.get('watermark_text', '')
     if watermark_text:
         # Reuse subtitle font or load new one
-        watermark_font = ImageFont.truetype(font_path, 30) if 'font_path' in locals() else font_subtitle
+        watermark_font = ImageFont.truetype(font_path, int(30 * scale)) if 'font_path' in locals() else font_subtitle
         
         # Calculate size
         bbox = draw.textbbox((0, 0), watermark_text, font=watermark_font)
@@ -204,10 +269,10 @@ def generate_slide_image(question: Dict, background: Image.Image,
         w_height = bbox[3] - bbox[1]
         
         # Position at bottom right with margins
-        # 1920 width, 1080 height
+        # TARGET_WIDTH width, TARGET_HEIGHT height
         # Margin right 80, Margin bottom 60
-        wx = 1920 - 80 - w_width
-        wy = 1080 - 60 - w_height
+        wx = TARGET_WIDTH - SAFE_MARGIN_RIGHT - w_width
+        wy = TARGET_HEIGHT - (60 * scale) - w_height
         
         # Draw watermark
         draw.text((wx, wy), watermark_text, font=watermark_font, fill=custom_color)

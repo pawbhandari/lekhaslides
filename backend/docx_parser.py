@@ -25,6 +25,17 @@ def parse_questions_from_docx(file_content: bytes) -> List[Dict]:
         print("Falling back to python-docx (slower)...")
         return slow_parse_fallback(file_content)
 
+def clean_markdown_artifacts(text: str) -> str:
+    """
+    Remove common markdown artifacts and clean text.
+    Removes: **, *, __, _, and trims whitespace.
+    """
+    # Replace markdown symbols with empty or space if needed
+    # We want to remove the symbols but keep the text
+    text = text.replace('**', '').replace('__', '') # Bold
+    text = text.replace('*', '').replace('_', '')   # Italic/Bullet
+    return text.strip()
+
 def parse_lines(lines_iterator) -> List[Dict]:
     """
     Shared logic to parse lines of text into questions.
@@ -37,7 +48,8 @@ def parse_lines(lines_iterator) -> List[Dict]:
         if not text:
             continue
             
-        clean_text = text.replace('**', '').replace('*', '').strip()
+        # Clean artifacts for question detection
+        clean_text = clean_markdown_artifacts(text)
         
         # Check for Question
         match = re.match(r'^(\d+)\.?\s*(.+)', clean_text)
@@ -57,17 +69,23 @@ def parse_lines(lines_iterator) -> List[Dict]:
         
         # Check for pointers
         if current_q:
+            # First clean line start bullets for detection
             bullet_text = text.lstrip('-•*').strip()
+            
             if bullet_text:
-                if ':' in bullet_text and not bullet_text.startswith('http'):
+                # Then clean artifacts from the content
+                clean_body_text = clean_markdown_artifacts(bullet_text)
+                
+                if ':' in clean_body_text and not clean_body_text.startswith('http'):
                      # Simple heuristic: colon separates label from body
-                     # Avoid http: links being treated as labels
-                    parts = bullet_text.split(':', 1)
+                    parts = clean_body_text.split(':', 1)
+                    
                     label = parts[0].strip() + ':'
                     body = parts[1].strip()
+                    
                     current_q["pointers"].append([label, body])
                 else:
-                    current_q["pointers"].append(['', bullet_text])
+                    current_q["pointers"].append(['', clean_body_text])
     
     if current_q:
         questions.append(current_q)

@@ -67,6 +67,22 @@ async def parse_docx(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"Error parsing docx: {str(e)}")
 
 
+@app.post("/api/parse-text")
+async def parse_text(text: str = Form(...)):
+    """
+    Parse raw text input directly
+    """
+    try:
+        print(f"Parsing raw text input: {len(text)} chars")
+        questions = parse_questions_from_md(text)
+        return {
+            "questions": questions,
+            "total": len(questions)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error parsing text: {str(e)}")
+
+
 @app.post("/api/generate-preview")
 async def generate_preview(
     background: UploadFile = File(...),
@@ -100,7 +116,7 @@ async def generate_preview(
         
         # Generate slide
         print("🎨 Generating slide image...")
-        slide_img = generate_slide_image(question, bg_image, cfg)
+        slide_img = generate_slide_image(question, bg_image, cfg, preview_mode=True)
         print(f"✓ Slide generated: {slide_img.size}")
         
         # Convert to bytes
@@ -127,57 +143,79 @@ async def generate_pptx(
     config: str = Form(...)
 ):
     """
-    Generate complete PPTX with all slides
-    
-    Returns: PPTX file for download
+    Generate complete PPTX with all slides - Returns Server-Sent Events for progress,
+    then the final PPTX as a base64 encoded payload.
     """
-    try:
-        print(f"\n{'='*60}")
-        print("📊 GENERATING COMPLETE PRESENTATION")
-        print(f"{'='*60}")
-        
-        # Load background
-        print("📁 Loading background image...")
-        bg_bytes = await background.read()
-        bg_image = Image.open(io.BytesIO(bg_bytes))
-        print(f"✓ Background loaded: {bg_image.size}")
-        
-        # Parse data
-        print("📋 Parsing questions...")
-        questions = json.loads(questions_data)
-        cfg = json.loads(config)
-        print(f"✓ Found {len(questions)} questions to process")
-        
-        # Generate all slide images
-        print("\n🎨 Generating slides:")
-        slide_images = []
-        for i, question in enumerate(questions, 1):
-            print(f"  [{i}/{len(questions)}] Generating slide {question.get('number')}...", end=" ")
-            img = generate_slide_image(question, bg_image, cfg)
-            slide_images.append(img)
-            print("✓")
-        
-        print(f"✓ All {len(slide_images)} slides generated!")
-        
-        # Build PPTX
-        print("\n📦 Building PowerPoint file...")
-        pptx_bytes = create_pptx_from_images(slide_images)
-        print("✓ PPTX file created!")
-        
-        print("\n✅ PRESENTATION COMPLETE!")
-        print(f"{'='*60}\n")
-        
-        return StreamingResponse(
-            pptx_bytes,
-            media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            headers={"Content-Disposition": "attachment; filename=Lekhaslides_Presentation.pptx"}
-        )
-        
-    except Exception as e:
-        print(f"❌ ERROR generating PPTX: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error generating PPTX: {str(e)}")
+    import base64
+    from fastapi.responses import StreamingResponse
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    async def generate_with_progress():
+        try:
+            # Load background
+            bg_bytes = await background.read()
+            bg_image = Image.open(io.BytesIO(bg_bytes))
+            bg_id = id(bg_image)  # Unique ID for caching
+            
+            # Parse data
+            questions = json.loads(questions_data)
+            cfg = json.loads(config)
+            total = len(questions)
+            
+            # Send initial event
+            yield f"data: {json.dumps({'type': 'start', 'total': total})}\n\n"
+            
+            # Generate slides with parallel processing for speed
+            slide_images = [None] * total
+            completed = 0
+            
+            # Use ThreadPool for parallel generation (with caching, this is very fast)
+            def generate_one(idx_question):
+                idx, question = idx_question
+                return idx, generate_slide_image(question, bg_image, cfg, bg_id=bg_id)
+            
+            # Process in batches of 4 for parallelism
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = {executor.submit(generate_one, (i, q)): i 
+                          for i, q in enumerate(questions)}
+                
+                for future in as_completed(futures):
+                    idx, img = future.result()
+                    slide_images[idx] = img
+                    completed += 1
+                    
+                    # Send progress event
+                    progress = {"type": "progress", "current": completed, "total": total, "percent": round((completed/total)*100)}
+                    yield f"data: {json.dumps(progress)}\n\n"
+            
+            # Build PPTX
+            pptx_bytes_io = create_pptx_from_images(slide_images)
+            pptx_bytes = pptx_bytes_io.read()
+            
+            # Encode as base64 for SSE delivery
+            b64_pptx = base64.b64encode(pptx_bytes).decode('utf-8')
+            
+            # Send complete event with the file
+            yield f"data: {json.dumps({'type': 'complete', 'file': b64_pptx})}\n\n"
+            
+            # Clear caches after generation
+            from slide_generator import clear_caches
+            clear_caches()
+            
+        except Exception as e:
+            print(f"❌ ERROR generating PPTX: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate_with_progress(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
 
 
 @app.get("/health")

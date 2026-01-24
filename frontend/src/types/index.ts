@@ -14,6 +14,11 @@ export interface Config {
     pos_x?: number;
     pos_y?: number;
     watermark_text?: string;
+    pointer_spacing?: number;
+    font_family?: 'Chalk' | 'Casual' | 'Playful' | 'Natural';
+    badge_x?: number;
+    badge_y?: number;
+    render_badge?: boolean;
 }
 
 export interface ParsedDocxResponse {
