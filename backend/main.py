@@ -18,6 +18,25 @@ try:
 except:
     pass
 
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi import Request
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    import datetime
+    try:
+        with open("validation_error_log.txt", "w") as f:
+            f.write(f"Timestamp: {datetime.datetime.now()}\n")
+            f.write(f"URL: {request.url}\n")
+            f.write(f"Errors: {str(exc.errors())}\n")
+    except:
+        pass
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()},
+    )
+
 # CORS for React frontend
 app.add_middleware(
     CORSMiddleware,
@@ -29,6 +48,12 @@ app.add_middleware(
 
 @app.post("/api/parse-docx")
 async def parse_docx(file: UploadFile = File(...)):
+    try:
+        with open("parse_request_log.txt", "a") as f:
+            import datetime
+            f.write(f"{datetime.datetime.now()}: Parse Request Received\n")
+    except:
+        pass
     """
     Parse .docx or .md/.txt file and return structured questions
     
@@ -100,9 +125,14 @@ async def generate_preview(
     
     Returns: PNG image
     """
+    print(f"\n{'='*60}")
+    print("📸 GENERATING PREVIEW")
     try:
-        print(f"\n{'='*60}")
-        print("📸 GENERATING PREVIEW")
+        with open("request_log.txt", "a") as f:
+            import datetime
+            f.write(f"{datetime.datetime.now()}: Preview Request Received\n")
+            
+        print(f"{'='*60}")
         print(f"{'='*60}")
         
         # Load background image
@@ -167,11 +197,13 @@ async def generate_pptx(
     from fastapi.responses import StreamingResponse
     from concurrent.futures import ThreadPoolExecutor, as_completed
     
+    # Read file immediately to prevent context loss
+    bg_content = await background.read()
+    
     async def generate_with_progress():
         try:
             # Load background
-            bg_bytes = await background.read()
-            bg_image = Image.open(io.BytesIO(bg_bytes))
+            bg_image = Image.open(io.BytesIO(bg_content))
             bg_id = id(bg_image)  # Unique ID for caching
             
             # Parse data
