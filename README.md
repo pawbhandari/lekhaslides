@@ -153,7 +153,7 @@ npm run preview  # Preview production build
 ### 1. Input Flexibility
 - ✅ **File Upload** - Drag-and-drop .docx file with questions
 - ✅ **Text Paste** - Directly paste question content (no file needed)
-- ✅ Background image upload with preview
+- ✅ Background image upload with preview (supports standard & truncated images)
 - ✅ Automatic markdown artifact cleanup (`*`, `**`, `_`, `__`)
 
 ### 2. Font Selection
@@ -306,6 +306,12 @@ Test the API using the interactive docs at http://localhost:8000/docs
 ---
 
 ## Changelog
+
+### v2.1 (January 24, 2026) - Stability Update
+- ✅ **Fix**: Resolved backend crash when rendering rotated text/badges
+- ✅ **Fix**: Fixed background image caching issue (previews now update correctly)
+- ✅ **Improvement**: Added support for truncated/incomplete image files
+- ✅ **Verification**: Verified full slide generation workflow
 
 ### v2.0 (January 2026)
 - ✅ Text input mode (paste directly)
