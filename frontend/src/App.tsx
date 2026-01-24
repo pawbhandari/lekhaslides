@@ -1,10 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import toast, { Toaster } from 'react-hot-toast';
 import { FileUpload } from './components/FileUpload';
 import { ConfigPanel } from './components/ConfigPanel';
 
 import { ProgressBar } from './components/ProgressBar';
 import { DownloadButton } from './components/DownloadButton';
+import { DraggableResizableCard } from './components/DraggableResizableCard';
+import { ColorPickerToolbar } from './components/ColorPickerToolbar';
 import { parseDocx, parseText, generatePreview, generatePPTX, downloadBlob } from './services/api';
 
 // Imports cleaned
@@ -24,18 +26,49 @@ function App() {
   const [inputText, setInputText] = useState('');
 
   // Configuration
-  const [config, setConfig] = useState<Config>({
-    instructor_name: 'Mayank Agarwal',
-    subtitle: '{ Basics with Knowledge }',
-    badge_text: 'Make Your own Concept',
-    font_size_heading: 60,
-    font_size_body: 40,
-    font_text_color: '#F0C83C',
-    pos_x: 0,
-    pos_y: -25,
-    watermark_text: '',
-    pointer_spacing: -28
+  const [config, setConfig] = useState<Config>(() => {
+    let savedConfig = {};
+    const saved = localStorage.getItem('lekha_config');
+    if (saved) {
+      try {
+        savedConfig = JSON.parse(saved);
+      } catch (e) {
+        console.error('Failed to parse saved config:', e);
+      }
+    }
+
+    // Default config
+    const defaults: Config = {
+      instructor_name: 'Mayank Agarwal',
+      subtitle: '{ Basics with Knowledge }',
+      badge_text: 'Make Your own Concept',
+      font_size_heading: 60,
+      font_size_body: 60 * 0.46, // Calculated
+      font_text_color: '#F0C83C',
+      pos_x: 0,
+      pos_y: -25,
+      watermark_text: '',
+      pointer_spacing: -28,
+
+      // Card defaults
+      instructor_size: 60,
+      instructor_color: '#F0C83C',
+      subtitle_size: 30, // 60 * 0.5
+      subtitle_color: '#64DCB4',
+      badge_size: 24,
+      badge_color: '#1E293B',
+      badge_bg_color: '#FFB450'
+    };
+
+    return { ...defaults, ...savedConfig };
   });
+
+  const [selectedCard, setSelectedCard] = useState<'instructor' | 'subtitle' | 'badge' | null>(null);
+
+  // Save config to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('lekha_config', JSON.stringify(config));
+  }, [config]);
 
   // Questions and preview
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -46,31 +79,49 @@ function App() {
   const [generatedBlob, setGeneratedBlob] = useState<Blob | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
-  // Badge Dragging State
-  const [isDraggingBadge, setIsDraggingBadge] = useState(false);
-  // Default position: Top Right (scaled to DOM later, but here we store relative pixel values for the container)
-  // Actually, let's store DOM pixels for smooth dragging, but init is tricky without knowing container width.
-  // We'll init to 0,0 and let a useEffect set it propertly or use percent.
-  // Let's store raw pixels relative to container.
-  const [badgePos, setBadgePos] = useState({ x: 0, y: 0 });
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  // Container Scale for responsiveness (Preview is scaling down 1920p layout)
+  const [containerScale, setContainerScale] = useState(0.5);
   const previewElementRef = useRef<HTMLDivElement>(null);
 
-  // Initialize badge position once container is measured or on first load?
-  // We'll do it lazily or assume a default ratio.
-  useEffect(() => {
-    if (previewElementRef.current && !config.badge_x) {
-      // Set initial default: Top Right
-      const rect = previewElementRef.current.getBoundingClientRect();
-      const domWidth = rect.width;
-      const scale = domWidth / 1920;
+  // Manual Preview Trigger
+  const [triggerPreview, setTriggerPreview] = useState(0);
+  const handleManualRefresh = () => setTriggerPreview(prev => prev + 1);
 
-      setBadgePos({
-        x: domWidth - (350 * scale) - (80 * scale), // Right margin 80 scaled
-        y: 60 * scale // Top margin 60 scaled
-      });
-    }
-  }, [previewElementRef.current, previewUrl]); // Run when preview appears
+  // Sync container scale
+  useEffect(() => {
+    const updateScale = () => {
+      if (previewElementRef.current) {
+        const rect = previewElementRef.current.getBoundingClientRect();
+        // Scale = current / original
+        setContainerScale(rect.width / 1920);
+      }
+    };
+
+    // Initial update
+    updateScale();
+
+    // Listen for resize
+    window.addEventListener('resize', updateScale);
+
+    // Also update when preview updates (layout might shift)
+    return () => window.removeEventListener('resize', updateScale);
+  }, [previewElementRef.current, previewUrl]);
+
+  // Update config from card interactions (Memoized to prevent drag interruptions)
+  const handleCardUpdate = useCallback((id: string, attrs: { x: number; y: number; fontSize: number }) => {
+    setConfig(prev => {
+      if (id === 'instructor') {
+        return { ...prev, instructor_x: attrs.x, instructor_y: attrs.y, instructor_size: attrs.fontSize };
+      }
+      if (id === 'subtitle') {
+        return { ...prev, subtitle_x: attrs.x, subtitle_y: attrs.y, subtitle_size: attrs.fontSize };
+      }
+      if (id === 'badge') {
+        return { ...prev, badge_x: attrs.x, badge_y: attrs.y, badge_size: attrs.fontSize };
+      }
+      return prev;
+    });
+  }, []);
 
   // Handle file uploads and generate preview
   const handleProcessContent = async () => {
@@ -105,7 +156,7 @@ function App() {
       const previewImageUrl = await generatePreview(
         backgroundFile,
         parsed.questions[0],
-        config
+        { ...config, render_badge: false, render_instructor: false, render_subtitle: false }
       );
       setPreviewUrl(previewImageUrl);
       toast.success('Preview ready!', { id: 'preview' });
@@ -160,21 +211,22 @@ function App() {
 
   // Reset to start over
   const handleReset = () => {
-    setBackgroundFile(null);
+    // Keep background file
     setDocxFile(null);
     setQuestions([]);
     setPreviewUrl(null);
     setGeneratedBlob(null);
     setAppState('upload');
-    toast.success('Ready to create new slides!');
+    toast.success('Ready to create new slides! Background kept.');
   };
 
-  // Real-time preview update when config changes
+  // Real-time preview update (Manual trigger only)
   useEffect(() => {
+    if (triggerPreview === 0) return;
+
     const controller = new AbortController();
 
     const updatePreview = async () => {
-      // Only process if we have the necessary data and start state
       if (!backgroundFile || (!docxFile && !inputText) || questions.length === 0) return;
 
       console.log('Fetching new preview...');
@@ -183,15 +235,13 @@ function App() {
         const previewImageUrl = await generatePreview(
           backgroundFile,
           questions[0],
-          { ...config, render_badge: false }, // Don't burn badge in preview, we use overlay
+          { ...config, render_badge: false, render_instructor: false, render_subtitle: false },
           controller.signal
         );
         console.log('Preview updated');
         setPreviewUrl(previewImageUrl);
       } catch (error: any) {
-        if (error.name === 'CanceledError' || error.name === 'AbortError') {
-          return;
-        }
+        if (error.name === 'CanceledError' || error.name === 'AbortError') return;
         console.error('Error updating preview:', error);
       } finally {
         if (!controller.signal.aborted) {
@@ -200,13 +250,10 @@ function App() {
       }
     };
 
-    // Debounce to prevent flashing/spamming
-    const timer = setTimeout(updatePreview, 500);
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [config]); // eslint-disable-line react-hooks/exhaustive-deps
+    updatePreview();
+
+    return () => controller.abort();
+  }, [triggerPreview]); // Run ONLY on manual trigger // eslint-disable-line react-hooks/exhaustive-deps
 
   // Check if ready to generate preview
   const canGeneratePreview = backgroundFile && ((inputMode === 'file' && docxFile) || (inputMode === 'text' && inputText.trim().length > 0)) && appState === 'upload';
@@ -357,11 +404,18 @@ function App() {
         <div className="relative z-10 w-full max-w-[1400px] flex flex-col h-full">
           {previewUrl ? (
             <div className="flex-1 flex flex-col justify-center space-y-6 animate-in fade-in duration-700 slide-in-from-bottom-4">
-              <div className="flex justify-between items-center px-4">
-                <div className="flex items-center space-x-3">
-                  <div className="h-2 w-2 rounded-full bg-accent-orange animate-pulse"></div>
-                  <h2 className="text-gray-400 font-medium text-sm tracking-wide">LIVE PREVIEW</h2>
-                </div>
+              <div className="flex items-center space-x-3">
+                <div className="h-2 w-2 rounded-full bg-accent-orange animate-pulse"></div>
+                <h2 className="text-gray-400 font-medium text-sm tracking-wide">LIVE PREVIEW</h2>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={handleManualRefresh}
+                  className="bg-accent-mint/10 hover:bg-accent-mint/20 text-accent-mint text-xs px-3 py-1.5 rounded-full border border-accent-mint/30 transition-all flex items-center space-x-1 font-bold"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Update Preview</span>
+                </button>
                 <div className="bg-white/5 px-3 py-1 rounded-full border border-white/10 text-xs text-gray-400 font-mono">
                   1920 x 1080
                 </div>
@@ -372,43 +426,7 @@ function App() {
                   {/* Aspect Ratio Box 16:9 */}
                   <div
                     className="aspect-video relative select-none"
-                    onMouseMove={(e) => {
-                      if (isDraggingBadge && previewElementRef.current) {
-                        const rect = previewElementRef.current.getBoundingClientRect();
-                        const x = e.clientX - rect.left - dragOffset.x;
-                        const y = e.clientY - rect.top - dragOffset.y;
-
-                        // Constrain to bounds
-                        const maxX = rect.width - (350 * (rect.width / 1920)); // approx badge width
-                        const maxY = rect.height - (70 * (rect.width / 1920));
-
-                        setBadgePos({
-                          x: Math.max(0, Math.min(x, maxX)),
-                          y: Math.max(0, Math.min(y, maxY))
-                        });
-                      }
-                    }}
-                    onMouseUp={() => {
-                      if (isDraggingBadge && previewElementRef.current) {
-                        setIsDraggingBadge(false);
-                        // Convert DOM coordinates back to 1920x1080 space
-                        const rect = previewElementRef.current.getBoundingClientRect();
-                        const scale = 1920 / rect.width;
-
-                        const finalX = Math.round(badgePos.x * scale);
-                        const finalY = Math.round(badgePos.y * scale);
-
-                        setConfig(prev => ({
-                          ...prev,
-                          badge_x: finalX,
-                          badge_y: finalY,
-                          render_badge: true // Re-enable for final render, though preview keeps it off? 
-                          // Actually, for preview we want it off so we can drag our HTML one.
-                          // For backend generation we want it on.
-                        }));
-                      }
-                    }}
-                    onMouseLeave={() => setIsDraggingBadge(false)}
+                    onClick={() => setSelectedCard(null)} // Click background to deselect
                     ref={previewElementRef}
                   >
                     {isPreviewLoading && (
@@ -422,33 +440,86 @@ function App() {
                       className="absolute inset-0 w-full h-full object-contain pointer-events-none"
                     />
 
-                    {/* Draggable Badge Overlay */}
+                    {/* Instructor Card */}
+                    {config.instructor_name && (
+                      <DraggableResizableCard
+                        id="instructor"
+                        text={config.instructor_name}
+                        x={config.instructor_x !== undefined ? config.instructor_x : 80}
+                        y={config.instructor_y !== undefined ? config.instructor_y : 60}
+                        fontSize={config.instructor_size || 60}
+                        color={config.instructor_color || '#F0C83C'}
+                        fontFamily={config.font_family || 'Chalk'}
+                        isBadge={false}
+                        containerScale={containerScale}
+                        isSelected={selectedCard === 'instructor'}
+                        onSelect={() => setSelectedCard('instructor')}
+                        onChange={(attrs) => handleCardUpdate('instructor', attrs)}
+                      />
+                    )}
+
+                    {/* Subtitle Card */}
+                    {config.subtitle && (
+                      <DraggableResizableCard
+                        id="subtitle"
+                        text={config.subtitle}
+                        x={config.subtitle_x !== undefined ? config.subtitle_x : 80}
+                        y={config.subtitle_y !== undefined ? config.subtitle_y : 110}
+                        fontSize={config.subtitle_size || 30}
+                        color={config.subtitle_color || '#64DCB4'}
+                        fontFamily={config.font_family || 'Chalk'}
+                        isBadge={false}
+                        containerScale={containerScale}
+                        isSelected={selectedCard === 'subtitle'}
+                        onSelect={() => setSelectedCard('subtitle')}
+                        onChange={(attrs) => handleCardUpdate('subtitle', attrs)}
+                      />
+                    )}
+
+                    {/* Badge Card */}
                     {config.badge_text && (
-                      <div
-                        style={{
-                          left: badgePos.x,
-                          top: badgePos.y,
-                          width: `${(350 / 1920) * 100}%`,
-                          height: `${(70 / 1080) * 100}%`,
+                      <DraggableResizableCard
+                        id="badge"
+                        text={config.badge_text}
+                        x={config.badge_x !== undefined ? config.badge_x : 1490}
+                        y={config.badge_y !== undefined ? config.badge_y : 60}
+                        fontSize={config.badge_size || 24}
+                        color={config.badge_color || '#1E293B'}
+                        fontFamily={config.font_family || 'Chalk'}
+                        backgroundColor={config.badge_bg_color || '#FFB450'}
+                        isBadge={true}
+                        containerScale={containerScale}
+                        isSelected={selectedCard === 'badge'}
+                        onSelect={() => setSelectedCard('badge')}
+                        onChange={(attrs) => handleCardUpdate('badge', attrs)}
+                      />
+                    )}
+
+                    {/* Color Picker Floating Toolbar */}
+                    {selectedCard && (
+                      <ColorPickerToolbar
+                        position={{
+                          x: Math.max(0, ((selectedCard === 'instructor' ? (config.instructor_x || 80) :
+                            selectedCard === 'subtitle' ? (config.subtitle_x || 80) :
+                              (config.badge_x || 1490)) * containerScale) + 50),
+                          y: Math.max(0, (selectedCard === 'instructor' ? (config.instructor_y || 60) :
+                            selectedCard === 'subtitle' ? (config.subtitle_y || 110) :
+                              (config.badge_y || 60)) * containerScale)
                         }}
-                        className={`absolute z-30 bg-accent-orange border-2 border-[#1e293b] rounded-md flex items-center justify-center cursor-move shadow-lg group hover:ring-2 ring-white/50 ${isDraggingBadge ? 'ring-2 ring-white scale-105' : ''}`}
-                        onMouseDown={(e) => {
-                          setIsDraggingBadge(true);
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          setDragOffset({
-                            x: e.clientX - rect.left,
-                            y: e.clientY - rect.top
+                        color={
+                          selectedCard === 'instructor' ? (config.instructor_color || '#F0C83C') :
+                            selectedCard === 'subtitle' ? (config.subtitle_color || '#64DCB4') :
+                              (config.badge_color || '#1E293B')
+                        }
+                        onChange={(c) => {
+                          setConfig(prev => {
+                            if (selectedCard === 'instructor') return { ...prev, instructor_color: c };
+                            if (selectedCard === 'subtitle') return { ...prev, subtitle_color: c };
+                            if (selectedCard === 'badge') return { ...prev, badge_color: c };
+                            return prev;
                           });
                         }}
-                      >
-                        <span className="text-[0.8vw] font-bold text-[#1e293b] whitespace-nowrap px-2 pointer-events-none select-none">
-                          {config.badge_text}
-                        </span>
-                        {/* Drag Handle Indicator */}
-                        <div className="absolute -top-2 -right-2 w-4 h-4 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center shadow-sm">
-                          <div className="w-2 h-2 bg-accent-orange rounded-full"></div>
-                        </div>
-                      </div>
+                      />
                     )}
                   </div>
                 </div>

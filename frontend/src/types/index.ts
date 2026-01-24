@@ -19,6 +19,21 @@ export interface Config {
     badge_x?: number;
     badge_y?: number;
     render_badge?: boolean;
+    instructor_x?: number;
+    instructor_y?: number;
+    render_instructor?: boolean;
+    subtitle_x?: number;
+    subtitle_y?: number;
+    render_subtitle?: boolean;
+
+    // Card Customizations
+    instructor_size?: number;
+    instructor_color?: string;
+    subtitle_size?: number;
+    subtitle_color?: string;
+    badge_size?: number;
+    badge_color?: string; // Text color
+    badge_bg_color?: string; // Background color for badge box
 }
 
 export interface ParsedDocxResponse {

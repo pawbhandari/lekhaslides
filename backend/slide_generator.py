@@ -156,54 +156,84 @@ def generate_slide_image(question: Dict, background: Image.Image,
     
     # === HEADER ===
     # Instructor name (top-left)
-    if config.get('instructor_name'):
-        draw.text((margin_left, margin_top), config['instructor_name'], 
-                  font=font_heading, fill=custom_color)
+    should_render_instructor = config.get('render_instructor', True)
+    if config.get('instructor_name') and should_render_instructor:
+        ins_x = int(config['instructor_x']) * scale if 'instructor_x' in config else margin_left
+        ins_y = int(config['instructor_y']) * scale if 'instructor_y' in config else margin_top
+        
+        # Dynamic Size/Color
+        ins_size_raw = config.get('instructor_size')
+        if ins_size_raw:
+             ins_font = get_cached_font(font_path, int(int(ins_size_raw) * scale))
+        else:
+             ins_font = font_heading
+
+        ins_color = config.get('instructor_color')
+        if not ins_color:
+             fill = custom_color
+        else:
+             fill = ins_color # Hex or name
+
+        draw.text((ins_x, ins_y), config['instructor_name'], font=ins_font, fill=fill)
     
     # Subtitle (below name)
-    if config.get('subtitle'):
-        draw.text((margin_left, margin_top + FONT_SIZE_HEADING + 10 * scale), config['subtitle'],
-                  font=font_subtitle, fill=MINT_GREEN)
+    should_render_subtitle = config.get('render_subtitle', True)
+    if config.get('subtitle') and should_render_subtitle:
+        sub_x = int(config['subtitle_x']) * scale if 'subtitle_x' in config else margin_left
+        sub_y = int(config['subtitle_y']) * scale if 'subtitle_y' in config else (margin_top + FONT_SIZE_HEADING + 10 * scale)
+        
+        sub_size_raw = config.get('subtitle_size')
+        if sub_size_raw:
+             sub_font = get_cached_font(font_path, int(int(sub_size_raw) * scale))
+        else:
+             sub_font = font_subtitle
+             
+        sub_color = config.get('subtitle_color', MINT_GREEN)
+        
+        draw.text((sub_x, sub_y), config['subtitle'], font=sub_font, fill=sub_color)
+
     
     # Badge (Positioned)
-    # Check if we should render badge (default True, can be disabled for frontend overlay)
     should_render_badge = config.get('render_badge', True)
     
     if config.get('badge_text') and should_render_badge:
-        badge_width = 350 * scale
-        badge_height = 70 * scale
+        # Badge Size logic
+        # Default font size 24. Box size 350x70.
+        # Scale box relative to font size ratio.
+        raw_badge_size = int(config.get('badge_size', 24))
+        badge_font_size = int(raw_badge_size * scale)
         
-        # Default top-right, but allow override
+        # Ratio relative to base 24
+        size_ratio = raw_badge_size / 24.0
+        
+        badge_width = int(350 * scale * size_ratio)
+        badge_height = int(70 * scale * size_ratio)
+        
         default_badge_x = TARGET_WIDTH - SAFE_MARGIN_RIGHT - badge_width
         default_badge_y = margin_top
         
-        # Use config coordinates if provided (scaled)
-        # We expect coordinates in 1920x1080 space from frontend
-        if 'badge_x' in config:
-             badge_x = int(config['badge_x']) * scale
-        else:
-             badge_x = default_badge_x
-             
-        if 'badge_y' in config:
-             badge_y = int(config['badge_y']) * scale
-        else:
-             badge_y = default_badge_y
+        badge_x = int(config['badge_x']) * scale if 'badge_x' in config else default_badge_x
+        badge_y = int(config['badge_y']) * scale if 'badge_y' in config else default_badge_y
         
-        # Draw rounded rectangle for badge
+        badge_bg = config.get('badge_bg_color', ORANGE)
+        badge_fg = config.get('badge_color', DARK)
+
+        # Draw rounded rectangle
         draw.rounded_rectangle(
             [(badge_x, badge_y), (badge_x + badge_width, badge_y + badge_height)],
-            radius=10 * scale,
-            fill=ORANGE,
+            radius=badge_height * 0.15,
+            fill=badge_bg,
             outline=DARK,
             width=int(3 * scale) or 1
         )
         
         # Badge text (centered)
-        badge_font = ImageFont.truetype(font_path, int(24 * scale)) if 'font_path' in locals() else font_subtitle
+        badge_font = get_cached_font(font_path, badge_font_size)
         draw.text((badge_x + badge_width//2, badge_y + badge_height//2),
-                  config['badge_text'], font=badge_font, fill=DARK, anchor="mm")
+                  config['badge_text'], font=badge_font, fill=badge_fg, anchor="mm")
     
     # === QUESTION ===
+
     # Position question below header (approx 200px gap in original, let's make it relative)
     question_y = margin_top + FONT_SIZE_HEADING + 100 * scale
     question_text = f"Ques {question['number']} => {question['question']}"
