@@ -136,6 +136,7 @@ export const DraggableResizableCard: React.FC<DraggableResizableCardProps> = ({
                 cursor: isDragging ? 'grabbing' : 'grab',
             }}
             onMouseDown={handleMouseDown}
+            onClick={(e) => e.stopPropagation()} // Prevent deselection
         >
             {/* The Content */}
             <div
