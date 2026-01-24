@@ -30,6 +30,85 @@ def clear_caches():
     _font_cache.clear()
     _bg_cache.clear()
 
+def draw_rotated_text(img, text, font, fill_color, x, y, angle):
+    """Draw text rotated around its center (CSS-style CW rotation match)"""
+    if angle == 0:
+        draw = ImageDraw.Draw(img)
+        draw.text((x, y), text, font=font, fill=fill_color)
+        return
+
+    try:
+        bbox = font.getbbox(text)
+        w = bbox[2] - bbox[0]
+        h = bbox[3] - bbox[1]
+    except AttributeError:
+        # Fallback for old Pillow/DefaultFont
+        w, h = font.getsize(text)
+    
+    # Create temp image large enough
+    diag = int((w**2 + h**2)**0.5)
+    temp_img = Image.new('RGBA', (diag + 50, diag + 50), (0,0,0,0))
+    temp_draw = ImageDraw.Draw(temp_img)
+    
+    # Draw centered in temp
+    cx, cy = temp_img.width // 2, temp_img.height // 2
+    temp_draw.text((cx - w/2, cy - h/2), text, font=font, fill=fill_color)
+    
+    # Rotate (PIL is CCW, CSS is CW, so negate)
+    rotated = temp_img.rotate(-angle, expand=True, resample=Image.BICUBIC)
+    
+    # Paste centered at original rect center
+    # Original rect (x,y) is top-left
+    orig_center_x = x + w / 2
+    orig_center_y = y + h / 2
+    
+    paste_x = int(orig_center_x - rotated.width / 2)
+    paste_y = int(orig_center_y - rotated.height / 2)
+    
+    img.paste(rotated, (paste_x, paste_y), rotated)
+
+def draw_rotated_badge(img, text, font, bg_color, fg_color, x, y, width, height, angle):
+    """Draw badge box rotated"""
+    # Create temp image
+    diag = int((width**2 + height**2)**0.5)
+    temp_img = Image.new('RGBA', (diag + 50, diag + 50), (0,0,0,0))
+    temp_draw = ImageDraw.Draw(temp_img)
+    
+    cx, cy = temp_img.width // 2, temp_img.height // 2
+    
+    # Draw Rect centered
+    # Outline color hardcoded to DARK (#1E2832) as per previous constant
+    temp_draw.rounded_rectangle(
+        [(cx - width/2, cy - height/2), (cx + width/2, cy + height/2)],
+        radius=height * 0.15,
+        fill=bg_color,
+        outline="#1E2832",
+        width=3
+    )
+    
+    # Draw text centered
+    try:
+        bbox = font.getbbox(text)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+    except AttributeError:
+        text_w, text_h = font.getsize(text)
+        
+    # Centering text
+    temp_draw.text((cx - text_w/2, cy - text_h/2), text, font=font, fill=fg_color)
+    
+    # Rotate
+    rotated = temp_img.rotate(-angle, expand=True, resample=Image.BICUBIC)
+    
+    # Paste
+    orig_center_x = x + width / 2
+    orig_center_y = y + height / 2
+    
+    paste_x = int(orig_center_x - rotated.width / 2)
+    paste_y = int(orig_center_y - rotated.height / 2)
+    
+    img.paste(rotated, (paste_x, paste_y), rotated)
+
 def wrap_text(text: str, max_width: int, font: ImageFont.FreeTypeFont, 
               draw: ImageDraw.ImageDraw) -> List[str]:
     """Wrap text to fit within max_width pixels"""
@@ -99,6 +178,7 @@ def generate_slide_image(question: Dict, background: Image.Image,
     font_filename = FONTS.get(selected_font, 'PatrickHand-Regular.ttf')
 
     # Load fonts with caching
+    font_path = None
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         font_path = os.path.join(base_dir, "fonts", font_filename)
@@ -116,6 +196,7 @@ def generate_slide_image(question: Dict, background: Image.Image,
         
     except Exception as e:
         print(f"⚠️ Could not load custom/system font: {e}")
+        font_path = None
         font_heading = ImageFont.load_default()
         font_subtitle = ImageFont.load_default()
         font_question = ImageFont.load_default()
@@ -163,7 +244,7 @@ def generate_slide_image(question: Dict, background: Image.Image,
         
         # Dynamic Size/Color
         ins_size_raw = config.get('instructor_size')
-        if ins_size_raw:
+        if ins_size_raw and font_path:
              ins_font = get_cached_font(font_path, int(int(ins_size_raw) * scale))
         else:
              ins_font = font_heading
@@ -174,7 +255,9 @@ def generate_slide_image(question: Dict, background: Image.Image,
         else:
              fill = ins_color # Hex or name
 
-        draw.text((ins_x, ins_y), config['instructor_name'], font=ins_font, fill=fill)
+        r_val = config.get('instructor_rotation')
+        ins_rotation = float(r_val) if r_val is not None else 0.0
+        draw_rotated_text(img, config['instructor_name'], ins_font, fill, ins_x, ins_y, ins_rotation)
     
     # Subtitle (below name)
     should_render_subtitle = config.get('render_subtitle', True)
@@ -183,14 +266,16 @@ def generate_slide_image(question: Dict, background: Image.Image,
         sub_y = int(config['subtitle_y']) * scale if 'subtitle_y' in config else (margin_top + FONT_SIZE_HEADING + 10 * scale)
         
         sub_size_raw = config.get('subtitle_size')
-        if sub_size_raw:
+        if sub_size_raw and font_path:
              sub_font = get_cached_font(font_path, int(int(sub_size_raw) * scale))
         else:
              sub_font = font_subtitle
              
         sub_color = config.get('subtitle_color', MINT_GREEN)
         
-        draw.text((sub_x, sub_y), config['subtitle'], font=sub_font, fill=sub_color)
+        r_val = config.get('subtitle_rotation')
+        sub_rotation = float(r_val) if r_val is not None else 0.0
+        draw_rotated_text(img, config['subtitle'], sub_font, sub_color, sub_x, sub_y, sub_rotation)
 
     
     # Badge (Positioned)
@@ -198,8 +283,6 @@ def generate_slide_image(question: Dict, background: Image.Image,
     
     if config.get('badge_text') and should_render_badge:
         # Badge Size logic
-        # Default font size 24. Box size 350x70.
-        # Scale box relative to font size ratio.
         raw_badge_size = int(config.get('badge_size', 24))
         badge_font_size = int(raw_badge_size * scale)
         
@@ -217,20 +300,15 @@ def generate_slide_image(question: Dict, background: Image.Image,
         
         badge_bg = config.get('badge_bg_color', ORANGE)
         badge_fg = config.get('badge_color', DARK)
-
-        # Draw rounded rectangle
-        draw.rounded_rectangle(
-            [(badge_x, badge_y), (badge_x + badge_width, badge_y + badge_height)],
-            radius=badge_height * 0.15,
-            fill=badge_bg,
-            outline=DARK,
-            width=int(3 * scale) or 1
-        )
         
-        # Badge text (centered)
-        badge_font = get_cached_font(font_path, badge_font_size)
-        draw.text((badge_x + badge_width//2, badge_y + badge_height//2),
-                  config['badge_text'], font=badge_font, fill=badge_fg, anchor="mm")
+        r_val = config.get('badge_rotation')
+        badge_rotation = float(r_val) if r_val is not None else -2.0
+        if font_path:
+            badge_font = get_cached_font(font_path, badge_font_size)
+        else:
+            badge_font = font_subtitle
+
+        draw_rotated_badge(img, config['badge_text'], badge_font, badge_bg, badge_fg, badge_x, badge_y, badge_width, badge_height, badge_rotation)
     
     # === QUESTION ===
 

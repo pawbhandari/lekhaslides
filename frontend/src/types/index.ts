@@ -34,6 +34,11 @@ export interface Config {
     badge_size?: number;
     badge_color?: string; // Text color
     badge_bg_color?: string; // Background color for badge box
+
+    // Rotation properties
+    instructor_rotation?: number;
+    subtitle_rotation?: number;
+    badge_rotation?: number;
 }
 
 export interface ParsedDocxResponse {

@@ -12,6 +12,12 @@ from pptx_builder import create_pptx_from_images
 
 app = FastAPI(title="Lekhaslides API")
 
+try:
+    with open("startup_log.txt", "w") as f:
+        f.write("Backend main.py loaded\n")
+except:
+    pass
+
 # CORS for React frontend
 app.add_middleware(
     CORSMiddleware,
@@ -132,7 +138,18 @@ async def generate_preview(
     except Exception as e:
         print(f"❌ ERROR generating preview: {str(e)}")
         import traceback
+        import datetime
         traceback.print_exc()
+        
+        # Write to log file for debugging
+        try:
+            with open("error_log.txt", "w") as f: # Overwrite to get latest
+                f.write(f"Timestamp: {datetime.datetime.now()}\n")
+                f.write(f"Error: {str(e)}\n")
+                traceback.print_exc(file=f)
+        except:
+             pass
+             
         raise HTTPException(status_code=500, detail=f"Error generating preview: {str(e)}")
 
 

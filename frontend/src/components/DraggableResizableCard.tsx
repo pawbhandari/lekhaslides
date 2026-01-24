@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Move } from 'lucide-react';
+import { ColorPickerToolbar } from './ColorPickerToolbar';
+import { RefreshCw } from 'lucide-react'; // Icon for rotate? Or just a dot. 
 
 interface DraggableResizableCardProps {
     id: string;
@@ -8,16 +9,17 @@ interface DraggableResizableCardProps {
     y: number;
     fontSize: number;
     color: string;
+    rotation: number;
     fontFamily: string;
     backgroundColor?: string;
     isBadge?: boolean;
 
-    // Canvas context
-    containerScale: number; // e.g. 0.5 for 960px preview of 1920px slide
+    containerScale: number;
     isSelected: boolean;
 
     onSelect: () => void;
-    onChange: (attrs: { x: number; y: number; fontSize: number }) => void;
+    onChange: (attrs: { x: number; y: number; fontSize: number; rotation: number }) => void;
+    onColorChange: (color: string) => void;
 }
 
 export const DraggableResizableCard: React.FC<DraggableResizableCardProps> = ({
@@ -27,18 +29,23 @@ export const DraggableResizableCard: React.FC<DraggableResizableCardProps> = ({
     y,
     fontSize,
     color,
+    rotation,
     fontFamily,
     backgroundColor,
     isBadge,
     containerScale,
     isSelected,
     onSelect,
-    onChange
+    onChange,
+    onColorChange
 }) => {
     const [isDragging, setIsDragging] = useState(false);
     const [isResizing, setIsResizing] = useState(false);
+    const [isRotating, setIsRotating] = useState(false);
+
     const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-    const [initialAttrs, setInitialAttrs] = useState({ x, y, fontSize });
+    const [initialAttrs, setInitialAttrs] = useState({ x, y, fontSize, rotation });
+    const [centerPos, setCenterPos] = useState({ x: 0, y: 0 }); // For rotation
 
     const cardRef = useRef<HTMLDivElement>(null);
 
@@ -61,12 +68,12 @@ export const DraggableResizableCard: React.FC<DraggableResizableCardProps> = ({
     // Handlers
     const handleMouseDown = (e: React.MouseEvent) => {
         e.stopPropagation();
-        e.preventDefault(); // Prevent text selection
+        e.preventDefault();
         onSelect();
 
         setIsDragging(true);
         setDragStart({ x: e.clientX, y: e.clientY });
-        setInitialAttrs({ x, y, fontSize });
+        setInitialAttrs({ x, y, fontSize, rotation });
     };
 
     const handleResizeStart = (e: React.MouseEvent) => {
@@ -76,30 +83,47 @@ export const DraggableResizableCard: React.FC<DraggableResizableCardProps> = ({
 
         setIsResizing(true);
         setDragStart({ x: e.clientX, y: e.clientY });
-        setInitialAttrs({ x, y, fontSize });
+        setInitialAttrs({ x, y, fontSize, rotation });
     };
 
-    // Global Listeners for dragging/resizing
+    const handleRotateStart = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        e.preventDefault();
+        onSelect();
+
+        // Calculate center for atan2
+        if (cardRef.current) {
+            const rect = cardRef.current.getBoundingClientRect();
+            setCenterPos({
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2
+            });
+            const startAngle = Math.atan2(e.clientY - (rect.top + rect.height / 2), e.clientX - (rect.left + rect.width / 2));
+
+            setIsRotating(true);
+            setDragStart({ x: startAngle, y: 0 }); // Store angle in x
+            setInitialAttrs({ x, y, fontSize, rotation });
+        }
+    };
+
+    // Global Listeners
     useEffect(() => {
-        if (!isDragging && !isResizing) return;
+        if (!isDragging && !isResizing && !isRotating) return;
 
         const handleMove = (e: MouseEvent) => {
-            const dx = (e.clientX - dragStart.x) / containerScale;
-            const dy = (e.clientY - dragStart.y) / containerScale;
-
             if (isDragging) {
+                const dx = (e.clientX - dragStart.x) / containerScale;
+                const dy = (e.clientY - dragStart.y) / containerScale;
+
                 onChange({
                     x: Math.round(initialAttrs.x + dx),
                     y: Math.round(initialAttrs.y + dy),
-                    fontSize: initialAttrs.fontSize
+                    fontSize: initialAttrs.fontSize,
+                    rotation: initialAttrs.rotation
                 });
             } else if (isResizing) {
-                // Resize logic: 
-                // Scaling font based on horizontal drag (dragging Right increases size)
-                // Or diagonal. Let's start with drag Right/Down = Increase.
-                // Simple scalar: 1px movement = 0.5 pt font change?
-                // Better: Percentage increase.
-
+                const dx = (e.clientX - dragStart.x) / containerScale;
+                const dy = (e.clientY - dragStart.y) / containerScale;
                 const sensitivity = 0.5;
                 const sizeDelta = (dx + dy) * sensitivity;
                 const newSize = Math.max(10, initialAttrs.fontSize + sizeDelta);
@@ -107,7 +131,22 @@ export const DraggableResizableCard: React.FC<DraggableResizableCardProps> = ({
                 onChange({
                     x: initialAttrs.x,
                     y: initialAttrs.y,
-                    fontSize: Math.round(newSize)
+                    fontSize: Math.round(newSize),
+                    rotation: initialAttrs.rotation
+                });
+            } else if (isRotating) {
+                const currentAngle = Math.atan2(e.clientY - centerPos.y, e.clientX - centerPos.x);
+                const startAngle = dragStart.x;
+                const angleDiff = currentAngle - startAngle;
+                const degDiff = angleDiff * (180 / Math.PI);
+
+                const newRotation = (initialAttrs.rotation + degDiff) % 360;
+
+                onChange({
+                    x: initialAttrs.x,
+                    y: initialAttrs.y,
+                    fontSize: initialAttrs.fontSize,
+                    rotation: Math.round(newRotation)
                 });
             }
         };
@@ -115,6 +154,7 @@ export const DraggableResizableCard: React.FC<DraggableResizableCardProps> = ({
         const handleUp = () => {
             setIsDragging(false);
             setIsResizing(false);
+            setIsRotating(false);
         };
 
         window.addEventListener('mousemove', handleMove);
@@ -124,7 +164,7 @@ export const DraggableResizableCard: React.FC<DraggableResizableCardProps> = ({
             window.removeEventListener('mousemove', handleMove);
             window.removeEventListener('mouseup', handleUp);
         };
-    }, [isDragging, isResizing, dragStart, initialAttrs, containerScale, onChange]);
+    }, [isDragging, isResizing, isRotating, dragStart, initialAttrs, centerPos, containerScale, onChange]);
 
     return (
         <div
@@ -133,19 +173,21 @@ export const DraggableResizableCard: React.FC<DraggableResizableCardProps> = ({
             style={{
                 left: displayX,
                 top: displayY,
+                // Apply rotation to the wrapper or content?
+                // Applying to wrapper affects drag axis interpretation usually.
+                // Standard: Transform wrapper.
+                transform: `rotate(${rotation}deg)`,
                 cursor: isDragging ? 'grabbing' : 'grab',
             }}
             onMouseDown={handleMouseDown}
-            onClick={(e) => e.stopPropagation()} // Prevent deselection
+            onClick={(e) => e.stopPropagation()}
         >
-            {/* The Content */}
             <div
                 className={`relative px-2 py-1 transition-colors duration-200 
                            ${isSelected ? 'ring-2 ring-accent-mint ring-offset-2 ring-offset-[#0f111a]' : 'hover:bg-white/5 border border-transparent hover:border-white/10 rounded-lg'}
                            ${backgroundColor ? 'rounded-md shadow-lg' : ''}`}
                 style={{
                     backgroundColor: backgroundColor || 'transparent',
-                    transform: isBadge ? 'rotate(-2deg)' : 'none'
                 }}
             >
                 <span
@@ -161,24 +203,44 @@ export const DraggableResizableCard: React.FC<DraggableResizableCardProps> = ({
                     {text}
                 </span>
 
-                {/* Resize Handles (Only show when selected) */}
+                {/* Overlays */}
                 {isSelected && (
                     <>
-                        <div className="absolute -top-3 -left-3 px-1 py-0.5 bg-accent-mint text-[10px] text-black font-bold rounded shadow-md pointer-events-none whitespace-nowrap">
+                        {/* Size Indicator */}
+                        <div className="absolute -top-5 -left-3 px-1 py-0.5 bg-accent-mint text-[10px] text-black font-bold rounded shadow-md pointer-events-none whitespace-nowrap">
                             {Math.round(fontSize)}px
                         </div>
 
-                        {/* Corner Handle (Bottom Right) - Larger Hitbox */}
+                        {/* Resize Handle (Bottom Right) */}
                         <div
                             className="absolute -bottom-3 -right-3 w-10 h-10 flex items-center justify-center cursor-nwse-resize z-50 group/handle"
                             onMouseDown={handleResizeStart}
                         >
                             <div className="w-4 h-4 bg-white border-2 border-accent-mint rounded-full shadow-sm group-hover/handle:scale-125 transition-transform" />
                         </div>
+
+                        {/* Rotate Handle (Bottom Left) */}
+                        <div
+                            className="absolute -bottom-3 -left-3 w-10 h-10 flex items-center justify-center cursor-ew-resize z-50 group/rotate"
+                            onMouseDown={handleRotateStart}
+                            title="Rotate"
+                        >
+                            <div className="w-4 h-4 bg-accent-yellow border-2 border-white rounded-full shadow-sm group-hover/rotate:scale-125 transition-transform flex items-center justify-center">
+                                {/* Optional: Icon inside */}
+                            </div>
+                        </div>
+
+                        {/* Color Picker (Top Right) */}
+                        <div className="absolute -top-16 -right-2 z-50 pointer-events-auto" onMouseDown={(e) => e.stopPropagation()}>
+                            <ColorPickerToolbar
+                                color={color}
+                                onChange={onColorChange}
+                                position={{ x: 0, y: 0 }}
+                            />
+                        </div>
                     </>
                 )}
             </div>
-
         </div>
     );
 };

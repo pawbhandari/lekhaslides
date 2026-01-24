@@ -6,7 +6,7 @@ import { ConfigPanel } from './components/ConfigPanel';
 import { ProgressBar } from './components/ProgressBar';
 import { DownloadButton } from './components/DownloadButton';
 import { DraggableResizableCard } from './components/DraggableResizableCard';
-import { ColorPickerToolbar } from './components/ColorPickerToolbar';
+
 import { parseDocx, parseText, generatePreview, generatePPTX, downloadBlob } from './services/api';
 
 // Imports cleaned
@@ -57,7 +57,12 @@ function App() {
       subtitle_color: '#64DCB4',
       badge_size: 24,
       badge_color: '#1E293B',
-      badge_bg_color: '#FFB450'
+      badge_bg_color: '#FFB450',
+
+      // Rotation defaults
+      instructor_rotation: 0,
+      subtitle_rotation: 0,
+      badge_rotation: -2
     };
 
     return { ...defaults, ...savedConfig };
@@ -108,16 +113,16 @@ function App() {
   }, [previewElementRef.current, previewUrl]);
 
   // Update config from card interactions (Memoized to prevent drag interruptions)
-  const handleCardUpdate = useCallback((id: string, attrs: { x: number; y: number; fontSize: number }) => {
+  const handleCardUpdate = useCallback((id: string, attrs: { x: number; y: number; fontSize: number; rotation: number }) => {
     setConfig(prev => {
       if (id === 'instructor') {
-        return { ...prev, instructor_x: attrs.x, instructor_y: attrs.y, instructor_size: attrs.fontSize };
+        return { ...prev, instructor_x: attrs.x, instructor_y: attrs.y, instructor_size: attrs.fontSize, instructor_rotation: attrs.rotation };
       }
       if (id === 'subtitle') {
-        return { ...prev, subtitle_x: attrs.x, subtitle_y: attrs.y, subtitle_size: attrs.fontSize };
+        return { ...prev, subtitle_x: attrs.x, subtitle_y: attrs.y, subtitle_size: attrs.fontSize, subtitle_rotation: attrs.rotation };
       }
       if (id === 'badge') {
-        return { ...prev, badge_x: attrs.x, badge_y: attrs.y, badge_size: attrs.fontSize };
+        return { ...prev, badge_x: attrs.x, badge_y: attrs.y, badge_size: attrs.fontSize, badge_rotation: attrs.rotation };
       }
       return prev;
     });
@@ -449,12 +454,14 @@ function App() {
                         y={config.instructor_y !== undefined ? config.instructor_y : 60}
                         fontSize={config.instructor_size || 60}
                         color={config.instructor_color || '#F0C83C'}
+                        rotation={config.instructor_rotation || 0}
                         fontFamily={config.font_family || 'Chalk'}
                         isBadge={false}
                         containerScale={containerScale}
                         isSelected={selectedCard === 'instructor'}
                         onSelect={() => setSelectedCard('instructor')}
                         onChange={(attrs) => handleCardUpdate('instructor', attrs)}
+                        onColorChange={(c) => setConfig(prev => ({ ...prev, instructor_color: c }))}
                       />
                     )}
 
@@ -467,12 +474,14 @@ function App() {
                         y={config.subtitle_y !== undefined ? config.subtitle_y : 110}
                         fontSize={config.subtitle_size || 30}
                         color={config.subtitle_color || '#64DCB4'}
+                        rotation={config.subtitle_rotation || 0}
                         fontFamily={config.font_family || 'Chalk'}
                         isBadge={false}
                         containerScale={containerScale}
                         isSelected={selectedCard === 'subtitle'}
                         onSelect={() => setSelectedCard('subtitle')}
                         onChange={(attrs) => handleCardUpdate('subtitle', attrs)}
+                        onColorChange={(c) => setConfig(prev => ({ ...prev, subtitle_color: c }))}
                       />
                     )}
 
@@ -485,6 +494,7 @@ function App() {
                         y={config.badge_y !== undefined ? config.badge_y : 60}
                         fontSize={config.badge_size || 24}
                         color={config.badge_color || '#1E293B'}
+                        rotation={config.badge_rotation !== undefined ? config.badge_rotation : -2}
                         fontFamily={config.font_family || 'Chalk'}
                         backgroundColor={config.badge_bg_color || '#FFB450'}
                         isBadge={true}
@@ -492,35 +502,11 @@ function App() {
                         isSelected={selectedCard === 'badge'}
                         onSelect={() => setSelectedCard('badge')}
                         onChange={(attrs) => handleCardUpdate('badge', attrs)}
+                        onColorChange={(c) => setConfig(prev => ({ ...prev, badge_color: c }))}
                       />
                     )}
 
-                    {/* Color Picker Floating Toolbar */}
-                    {selectedCard && (
-                      <ColorPickerToolbar
-                        position={{
-                          x: Math.max(0, ((selectedCard === 'instructor' ? (config.instructor_x || 80) :
-                            selectedCard === 'subtitle' ? (config.subtitle_x || 80) :
-                              (config.badge_x || 1490)) * containerScale) + 50),
-                          y: Math.max(0, (selectedCard === 'instructor' ? (config.instructor_y || 60) :
-                            selectedCard === 'subtitle' ? (config.subtitle_y || 110) :
-                              (config.badge_y || 60)) * containerScale)
-                        }}
-                        color={
-                          selectedCard === 'instructor' ? (config.instructor_color || '#F0C83C') :
-                            selectedCard === 'subtitle' ? (config.subtitle_color || '#64DCB4') :
-                              (config.badge_color || '#1E293B')
-                        }
-                        onChange={(c) => {
-                          setConfig(prev => {
-                            if (selectedCard === 'instructor') return { ...prev, instructor_color: c };
-                            if (selectedCard === 'subtitle') return { ...prev, subtitle_color: c };
-                            if (selectedCard === 'badge') return { ...prev, badge_color: c };
-                            return prev;
-                          });
-                        }}
-                      />
-                    )}
+
                   </div>
                 </div>
                 {/* Reflection Effect */}
