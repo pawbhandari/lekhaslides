@@ -175,6 +175,12 @@ async def generate_preview(
         
         # Generate slide
         print("🎨 Generating slide image...")
+        
+        # Check for per-slide config override
+        if "config_override" in question:
+            print(f"  ➜ Applying config override for preview")
+            cfg.update(question["config_override"])
+            
         slide_img = generate_slide_image(question, bg_image, cfg, preview_mode=True, use_cache=False)
         print(f"✓ Slide generated: {slide_img.size}")
         
@@ -208,6 +214,108 @@ async def generate_preview(
              pass
              
         raise HTTPException(status_code=500, detail=f"Error generating preview: {str(e)}")
+
+
+
+@app.post("/api/generate-batch-previews")
+async def generate_batch_previews(
+    background: UploadFile = File(...),
+    questions_data: str = Form(...),  # JSON array
+    config: str = Form(...), # JSON object
+    page: int = Form(1),
+    limit: int = Form(20)
+):
+    """
+    Generate low-res previews for a batch of slides (e.g., 20 at a time).
+    Returns list of base64 encoded images.
+    """
+    import base64
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    try:
+        # 1. Load and Aggressively Compress Background
+        bg_bytes = await background.read()
+        bg_image = Image.open(io.BytesIO(bg_bytes))
+        bg_image.load()
+        
+        # User Request: "very 90% compress image... slide size should not be more than 3 mb"
+        PREVIEW_MAX_DIM = 960 
+        bg_image = compress_image(bg_image, max_dimension=PREVIEW_MAX_DIM)
+        
+        # Ensure it's under 3MB (simulation)
+        img_byte_arr = io.BytesIO()
+        bg_image.save(img_byte_arr, format='JPEG', quality=85)
+        while img_byte_arr.tell() > 3 * 1024 * 1024:
+            img_byte_arr = io.BytesIO()
+            bg_image = bg_image.resize((int(bg_image.width*0.9), int(bg_image.height*0.9)))
+            bg_image.save(img_byte_arr, format='JPEG', quality=70)
+            
+        bg_id = id(bg_image)
+        
+        # 2. Parse Questions
+        questions = json.loads(questions_data)
+        cfg = json.loads(config)
+        total_questions = len(questions)
+        
+        # 3. Pagination Logic
+        start_idx = (page - 1) * limit
+        end_idx = min(start_idx + limit, total_questions)
+        
+        if start_idx >= total_questions:
+             return {
+                "total_pages": (total_questions + limit - 1) // limit,
+                "current_page": page,
+                "slides": []
+            }
+
+        page_questions = questions[start_idx:end_idx]
+        
+        # 4. Generate in Parallel
+        slides_result = []
+        
+        def generate_preview_one(idx, q):
+            # Pass original index to help frontend identify which slide is which
+            # Use preview_mode=True for faster generation
+            
+            # Check for per-slide config override
+            current_cfg = cfg.copy()
+            if "config_override" in q:
+                current_cfg.update(q["config_override"])
+
+            img = generate_slide_image(q, bg_image, current_cfg, preview_mode=True, bg_id=bg_id)
+            
+            # Convert to base64
+            buffered = io.BytesIO()
+            # aggressive compression for network transfer speed
+            img.save(buffered, format="JPEG", quality=60) 
+            img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+            
+            return {
+                "index": start_idx + idx, # Global index
+                "image": f"data:image/jpeg;base64,{img_str}",
+                "number": q.get('number')
+            }
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            # We map over the subset of questions for this page
+            futures = [executor.submit(generate_preview_one, i, q) for i, q in enumerate(page_questions)]
+            for future in as_completed(futures):
+                slides_result.append(future.result())
+        
+        # Sort by index to maintain order
+        slides_result.sort(key=lambda x: x["index"])
+        
+        return {
+            "total_pages": (total_questions + limit - 1) // limit,
+            "current_page": page,
+            "slides": slides_result
+        }
+
+    except Exception as e:
+        print(f"❌ ERROR generating batch previews: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/generate-pptx")
@@ -250,7 +358,12 @@ async def generate_pptx(
             # Use ThreadPool for parallel generation (with caching, this is very fast)
             def generate_one(idx_question):
                 idx, question = idx_question
-                return idx, generate_slide_image(question, bg_image, cfg, bg_id=bg_id)
+                # Check for per-slide config override
+                current_cfg = cfg.copy()
+                if "config_override" in question:
+                    current_cfg.update(question["config_override"])
+                
+                return idx, generate_slide_image(question, bg_image, current_cfg, bg_id=bg_id)
             
             # Process in batches of 4 for parallelism
             with ThreadPoolExecutor(max_workers=4) as executor:

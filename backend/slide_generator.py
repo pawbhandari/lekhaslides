@@ -40,13 +40,16 @@ def get_resized_background(background: Image.Image, width: int, height: int, bg_
 def compress_image(image: Image.Image, max_dimension: int = 1920) -> Image.Image:
     """
     Aggressively compress/resize large images to save memory before processing.
+    Also ensures the image is not excessively large in memory.
     """
+    # 1. Dimension Check
     if max(image.size) > max_dimension:
         ratio = max_dimension / max(image.size)
         new_size = (int(image.width * ratio), int(image.height * ratio))
         print(f"📉 Downscaling background from {image.size} to {new_size} for memory optimization")
-        return image.resize(new_size, Image.Resampling.LANCZOS)
-    return image
+        image = image.resize(new_size, Image.Resampling.LANCZOS)
+    
+    return image.convert("RGB")
 
 def clear_caches():
     """Clear all caches - call this between different generation sessions"""

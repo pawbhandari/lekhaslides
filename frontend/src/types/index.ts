@@ -2,6 +2,7 @@ export interface Question {
     number: number;
     question: string;
     pointers: [string, string][];
+    config_override?: Partial<Config>;
 }
 
 export interface Config {
@@ -50,4 +51,16 @@ export interface GenerationProgress {
     current: number;
     total: number;
     status: 'idle' | 'parsing' | 'generating-preview' | 'generating-pptx' | 'complete' | 'error';
+}
+
+export interface SlidePreview {
+    index: number;
+    image: string; // base64
+    number?: number;
+}
+
+export interface BatchPreviewResponse {
+    total_pages: number;
+    current_page: number;
+    slides: SlidePreview[];
 }

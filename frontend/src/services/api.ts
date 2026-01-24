@@ -145,3 +145,24 @@ export const downloadBlob = (blob: Blob, filename: string) => {
     window.URL.revokeObjectURL(url);
     document.body.removeChild(a);
 };
+
+export const generateBatchPreviews = async (
+    background: File,
+    questionsData: Question[],
+    config: Config,
+    page: number = 1,
+    limit: number = 20
+): Promise<import('../types').BatchPreviewResponse> => {
+    const formData = new FormData();
+    formData.append('background', background);
+    formData.append('questions_data', JSON.stringify(questionsData));
+    formData.append('config', JSON.stringify(config));
+    formData.append('page', page.toString());
+    formData.append('limit', limit.toString());
+
+    const response = await axios.post<import('../types').BatchPreviewResponse>(
+        `${API_BASE}/api/generate-batch-previews`,
+        formData
+    );
+    return response.data;
+};
