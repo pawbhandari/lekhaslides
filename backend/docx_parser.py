@@ -146,32 +146,56 @@ def slow_parse_fallback(file_content: bytes) -> List[Dict]:
     """
     Original parsing logic using python-docx
     """
-    doc = Document(io.BytesIO(file_content))
-    print(f"📄 FALLBACK PARSING DOCX - Found {len(doc.paragraphs)} paragraphs")
-    
-    def slow_lines_generator():
-        auto_num_counter = 1
-        for p in doc.paragraphs:
-            text = p.text.strip()
-            if not text:
-                continue
-            
-            # Detect auto-numbering in python-docx
-            is_auto_numbered = False
-            ilvl = 0
-            try:
-                if p._element.pPr is not None and p._element.pPr.numPr is not None:
-                    is_auto_numbered = True
-                    if p._element.pPr.numPr.ilvl is not None:
-                        ilvl = p._element.pPr.numPr.ilvl.val
-            except AttributeError:
-                pass
-            
-            if is_auto_numbered and ilvl == 0 and not re.match(r'^\d+', text):
-                text = f"{auto_num_counter}. {text}"
-                auto_num_counter += 1
-            
-            yield text
+    import zipfile
+    try:
+        doc = Document(io.BytesIO(file_content))
+        print(f"📄 FALLBACK PARSING DOCX - Found {len(doc.paragraphs)} paragraphs")
+        
+        def slow_lines_generator():
+            auto_num_counter = 1
+            for p in doc.paragraphs:
+                text = p.text.strip()
+                if not text:
+                    continue
+                
+                # Detect auto-numbering in python-docx
+                is_auto_numbered = False
+                ilvl = 0
+                try:
+                    if p._element.pPr is not None and p._element.pPr.numPr is not None:
+                        is_auto_numbered = True
+                        if p._element.pPr.numPr.ilvl is not None:
+                            ilvl = p._element.pPr.numPr.ilvl.val
+                except AttributeError:
+                    pass
+                
+                if is_auto_numbered and ilvl == 0 and not re.match(r'^\d+', text):
+                    text = f"{auto_num_counter}. {text}"
+                    auto_num_counter += 1
+                
+                yield text
 
-    return parse_lines(slow_lines_generator())
+        return parse_lines(slow_lines_generator())
+    except (zipfile.BadZipFile, Exception) as e:
+        print(f"❌ Docx parsing failed completely: {e}")
+        # Final attempt: Treat as raw text if it's not a zip, BUT with safety check
+        try:
+            # Check if it's binary data (like an image) - check for null bytes
+            if b'\x00' in file_content[:1024]:
+                raise Exception("Binary data detected (might be an image). Please upload images in the 'Images' tab.")
+
+            try:
+                text_content = file_content.decode('utf-8')
+            except:
+                text_content = file_content.decode('latin-1')
+            
+            # Additional safety: check ratio of printable characters
+            printable = sum(1 for c in text_content[:500] if c.isprintable() or c.isspace())
+            if printable / min(len(text_content), 500) < 0.8:
+                raise Exception("Content does not appear to be text. If this is a question sheet image, use the 'Images' tab.")
+
+            print("💡 Treating failing docx as raw text")
+            return parse_questions_from_md(text_content)
+        except Exception as inner_e:
+            raise Exception(f"File is not a valid document. {str(inner_e)}")
 

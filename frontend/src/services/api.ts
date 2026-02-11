@@ -7,7 +7,22 @@ export const parseDocx = async (file: File): Promise<ParsedDocxResponse> => {
     const formData = new FormData();
     formData.append('file', file);
 
+    console.log(`🔍 [API] parseDocx called for file: ${file.name}`);
     const response = await axios.post<ParsedDocxResponse>(`${API_BASE}/api/parse-docx`, formData);
+    console.log(`✅ [API] parseDocx success:`, response.data);
+    return response.data;
+};
+
+export const parseImages = async (files: File[]): Promise<ParsedDocxResponse> => {
+    const formData = new FormData();
+    files.forEach((file) => {
+        formData.append('files', file);
+    });
+
+    console.log(`🔍 [API] parseImages called for ${files.length} images`);
+    const response = await axios.post<ParsedDocxResponse>(`${API_BASE}/api/parse-images`, formData);
+    console.log(`✅ [API] parseImages result items:`, response.data.questions?.length);
+    console.dir(response.data.questions);
     return response.data;
 };
 
@@ -15,7 +30,9 @@ export const parseText = async (text: string): Promise<ParsedDocxResponse> => {
     const formData = new FormData();
     formData.append('text', text);
 
+    console.log(`🔍 [API] parseText called, length: ${text.length}`);
     const response = await axios.post<ParsedDocxResponse>(`${API_BASE}/api/parse-text`, formData);
+    console.log(`✅ [API] parseText success:`, response.data);
     return response.data;
 };
 
@@ -120,22 +137,47 @@ export const generatePPTX = async (
     }
 
     if (!pptxBase64) {
+        console.error('❌ No PPTX data received from server');
         throw new Error('No PPTX data received from server');
     }
 
+    if (pptxBase64.length < 100) {
+        console.error('❌ PPTX data too short:', pptxBase64.length, 'chars');
+        throw new Error('Invalid PPTX data received (too short)');
+    }
+
+    console.log('📦 PPTX Base64 length:', pptxBase64.length, 'chars');
+
     // Decode base64 to blob
-    const binaryString = atob(pptxBase64);
+    let binaryString;
+    try {
+        binaryString = atob(pptxBase64);
+        console.log('✓ Base64 decoded successfully:', binaryString.length, 'bytes');
+    } catch (e) {
+        console.error('❌ Failed to decode base64:', e);
+        throw new Error('Invalid base64 data received from server');
+    }
+
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
         bytes[i] = binaryString.charCodeAt(i);
     }
 
-    return new Blob([bytes], {
+    const blob = new Blob([bytes], {
         type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
     });
+
+    if (blob.size === 0) {
+        console.error('❌ Generated blob is empty!');
+        throw new Error('Generated PPTX file is empty');
+    }
+
+    console.log('✅ PPTX Blob created:', blob.size, 'bytes', `(${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
+    return blob;
 };
 
 export const downloadBlob = (blob: Blob, filename: string) => {
+    console.log('💾 Downloading blob:', filename, blob.size, 'bytes', blob.type);
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -144,6 +186,7 @@ export const downloadBlob = (blob: Blob, filename: string) => {
     a.click();
     window.URL.revokeObjectURL(url);
     document.body.removeChild(a);
+    console.log('✅ Download triggered');
 };
 
 export const generateBatchPreviews = async (
@@ -160,9 +203,11 @@ export const generateBatchPreviews = async (
     formData.append('page', page.toString());
     formData.append('limit', limit.toString());
 
+    console.log(`🔍 [API] generateBatchPreviews called, items: ${questionsData.length}, page: ${page}`);
     const response = await axios.post<import('../types').BatchPreviewResponse>(
         `${API_BASE}/api/generate-batch-previews`,
         formData
     );
+    console.log(`✅ [API] generateBatchPreviews success, received ${response.data.slides?.length} slides`);
     return response.data;
 };

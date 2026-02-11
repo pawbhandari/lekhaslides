@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import type { Question, Config } from '../types';
 import { generatePreview } from '../services/api';
-import { X, Save, Plus, Trash2, RefreshCw } from 'lucide-react';
+import { X, Save, Plus, Trash2, RefreshCw, Image as ImageIcon } from 'lucide-react';
+import { FileUpload } from './FileUpload';
 
 interface SlideEditorProps {
     question: Question;
@@ -23,10 +24,26 @@ export const SlideEditor = ({ question, background, config, onSave, onClose }: S
         updatePreview();
     }, []); // Initial load
 
+    // Auto-refresh when image is added/removed
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            updatePreview();
+        }, 500); // Debounce 500ms
+
+        return () => clearTimeout(timer);
+    }, [editedQuestion.image]); // Trigger when image changes
+
     const updatePreview = async () => {
         setIsLoading(true);
         try {
-            const url = await generatePreview(background, editedQuestion, config);
+            // Match the main preview: disable backend rendering of draggable elements
+            const previewConfig = {
+                ...config,
+                render_badge: false,
+                render_instructor: false,
+                render_subtitle: false
+            };
+            const url = await generatePreview(background, editedQuestion, previewConfig);
             setPreviewUrl(url);
         } catch (error) {
             console.error("Preview error", error);
@@ -113,6 +130,38 @@ export const SlideEditor = ({ question, background, config, onSave, onClose }: S
                                 }}
                                 className="w-full h-24 bg-black/20 border border-white/10 rounded-lg p-3 text-sm text-gray-200 focus:outline-none focus:border-accent-mint/50 transition-colors resize-none"
                             />
+                        </div>
+
+                        {/* Question Image */}
+                        <div className="space-y-2">
+                            <label className="text-xs text-gray-400 uppercase font-bold tracking-wider">Question Image (Diagram/Reference)</label>
+                            {editedQuestion.image ? (
+                                <div className="relative group rounded-lg overflow-hidden border border-white/10 aspect-video bg-black/40">
+                                    <img src={editedQuestion.image} className="w-full h-full object-contain" alt="Question" />
+                                    <button
+                                        onClick={() => setEditedQuestion({ ...editedQuestion, image: undefined })}
+                                        className="absolute top-2 right-2 p-1.5 bg-black/60 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500/80"
+                                    >
+                                        <X className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            ) : (
+                                <FileUpload
+                                    label="Upload Image"
+                                    accept=".jpg,.jpeg,.png"
+                                    onFileSelect={async (file) => {
+                                        if (file) {
+                                            const reader = new FileReader();
+                                            reader.onloadend = () => {
+                                                setEditedQuestion({ ...editedQuestion, image: reader.result as string });
+                                            };
+                                            reader.readAsDataURL(file);
+                                        }
+                                    }}
+                                    file={null}
+                                    icon="image"
+                                />
+                            )}
                         </div>
 
                         {/* Pointers List */}

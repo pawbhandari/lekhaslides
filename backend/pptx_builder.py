@@ -20,24 +20,34 @@ def create_pptx_from_images(images: List[Image.Image]) -> io.BytesIO:
     prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
     
-    for img in images:
-        # Convert PIL image to bytes
-        img_byte_arr = io.BytesIO()
-        img.save(img_byte_arr, format='PNG')
-        img_byte_arr.seek(0)
-        
-        # Add blank slide
-        slide_layout = prs.slide_layouts[6]  # Blank
-        slide = prs.slides.add_slide(slide_layout)
-        
-        # Add image filling entire slide
-        slide.shapes.add_picture(
-            img_byte_arr,
-            Inches(0),
-            Inches(0),
-            width=prs.slide_width,
-            height=prs.slide_height
-        )
+    for idx, img in enumerate(images):
+        try:
+            # Ensure image is in RGB mode (PPTX doesn't support RGBA or other modes well)
+            if img.mode != 'RGB':
+                print(f"Converting slide {idx+1} from {img.mode} to RGB")
+                img = img.convert('RGB')
+            
+            # Convert PIL image to bytes
+            img_byte_arr = io.BytesIO()
+            img.save(img_byte_arr, format='PNG')
+            img_byte_arr.seek(0)
+            
+            # Add blank slide
+            slide_layout = prs.slide_layouts[6]  # Blank
+            slide = prs.slides.add_slide(slide_layout)
+            
+            # Add image filling entire slide
+            slide.shapes.add_picture(
+                img_byte_arr,
+                Inches(0),
+                Inches(0),
+                width=prs.slide_width,
+                height=prs.slide_height
+            )
+            print(f"✓ Added slide {idx+1}/{len(images)}")
+        except Exception as e:
+            print(f"❌ Error adding slide {idx+1}: {str(e)}")
+            raise
     
     # Save to BytesIO
     pptx_output = io.BytesIO()

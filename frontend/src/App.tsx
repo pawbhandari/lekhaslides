@@ -7,15 +7,17 @@ import { DownloadButton } from './components/DownloadButton';
 import { DraggableResizableCard } from './components/DraggableResizableCard';
 import { SlideGrid } from './components/SlideGrid';
 import { SlideEditor } from './components/SlideEditor';
+import { ParsedContentReview } from './components/ParsedContentReview';
+import { ContentLayoutSelector } from './components/ContentLayoutSelector';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
-import { parseDocx, parseText, generatePreview, generatePPTX, downloadBlob, generateBatchPreviews } from './services/api';
+import { parseDocx, parseText, parseImages, generatePreview, generatePPTX, downloadBlob, generateBatchPreviews } from './services/api';
 
-// Imports cleaned
 import type { Config, Question, BatchPreviewResponse } from './types';
-import { Sparkles, RefreshCw, FileText, Upload, LayoutGrid } from 'lucide-react';
+import { Sparkles, RefreshCw, FileText, Upload, LayoutGrid, Image as ImageIcon, X } from 'lucide-react';
 
-type AppState = 'upload' | 'preview' | 'review' | 'generating' | 'complete';
-type InputMode = 'file' | 'text';
+type AppState = 'upload' | 'content-review' | 'preview' | 'review' | 'generating' | 'complete';
+type InputMode = 'file' | 'text' | 'images';
 
 function App() {
   // File states
@@ -25,6 +27,7 @@ function App() {
   // Text Input State
   const [inputMode, setInputMode] = useState<InputMode>('file');
   const [inputText, setInputText] = useState('');
+  const [inputImages, setInputImages] = useState<File[]>([]);
 
   // Configuration
   const [config, setConfig] = useState<Config>(() => {
@@ -63,7 +66,11 @@ function App() {
       // Rotation defaults
       instructor_rotation: 0,
       subtitle_rotation: 0,
-      badge_rotation: -2
+      badge_rotation: -2,
+
+      // Content layout defaults
+      content_region: 'full',
+      content_scale: 1.0
     };
 
     return { ...defaults, ...savedConfig };
@@ -90,6 +97,10 @@ function App() {
   const [batchPreviews, setBatchPreviews] = useState<BatchPreviewResponse | null>(null);
   const [isBatchLoading, setIsBatchLoading] = useState(false);
   const [editingSlideIndex, setEditingSlideIndex] = useState<number | null>(null);
+
+  // Content Review State (for image parsing flow)
+  const [isParsingMore, setIsParsingMore] = useState(false);
+  const addMoreImagesRef = useRef<HTMLInputElement>(null);
 
   // Container Scale for responsiveness (Preview is scaling down 1920p layout)
   const [containerScale, setContainerScale] = useState(0.5);
@@ -140,41 +151,153 @@ function App() {
     if (!backgroundFile) return;
     if (inputMode === 'file' && !docxFile) return;
     if (inputMode === 'text' && !inputText.trim()) return;
+    if (inputMode === 'images' && inputImages.length === 0) return;
 
     try {
-      setAppState('preview');
       toast.loading('Parsing content...', { id: 'parse' });
 
       let parsed;
       if (inputMode === 'file' && docxFile) {
+        const isImage = /\.(jpg|jpeg|png)$/i.test(docxFile.name);
+        if (isImage) {
+          toast.error("You uploaded an image in the 'File' tab. Please use the 'Images' tab for question images!", { id: 'parse', duration: 5000 });
+          return;
+        }
         parsed = await parseDocx(docxFile);
-      } else {
+      } else if (inputMode === 'text') {
         parsed = await parseText(inputText);
+      } else {
+        parsed = await parseImages(inputImages);
       }
 
       console.log('Parsed response:', parsed);
-      setQuestions(parsed.questions);
-      toast.success(`Found ${parsed.total} questions!`, { id: 'parse' });
 
-      // Generate preview for first question
-      if (!parsed.questions || parsed.questions.length === 0) {
+      const newQuestions = parsed.questions || [];
+      if (newQuestions.length === 0) {
         throw new Error('No questions found in content');
       }
 
+      // For IMAGE mode: go to content-review for editing first
+      if (inputMode === 'images') {
+        setQuestions(prev => {
+          if (prev.length > 0) {
+            const lastNum = prev[prev.length - 1].number || prev.length;
+            const adjustedNew = newQuestions.map((q: any, idx: number) => ({
+              ...q,
+              number: lastNum + idx + 1
+            }));
+            return [...prev, ...adjustedNew];
+          }
+          return newQuestions;
+        });
+        setInputImages([]);
+        setAppState('content-review');
+        toast.success(`Extracted ${newQuestions.length} questions! Review and edit below.`, { id: 'parse' });
+        return;
+      }
+
+      setAppState('preview');
+      console.log(`📦 Setting up preview for ${newQuestions.length} questions`);
+
+      setQuestions(prev => {
+        if (prev.length > 0) {
+          const lastNum = prev[prev.length - 1].number || prev.length;
+          const adjustedNew = newQuestions.map((q: any, idx: number) => ({
+            ...q,
+            number: lastNum + idx + 1
+          }));
+          return [...prev, ...adjustedNew];
+        }
+        return newQuestions;
+      });
+
+      toast.success(`Added ${newQuestions.length} new questions!`, { id: 'parse' });
+
       toast.loading('Generating preview...', { id: 'preview' });
+
+      // Defensively check for backgroundFile
+      if (!backgroundFile) {
+        throw new Error('Background file missing. Please upload or select a preset.');
+      }
+
       const previewImageUrl = await generatePreview(
         backgroundFile,
-        parsed.questions[0],
+        newQuestions[0], // Use newQuestions directly instead of questions state because state might not have updated yet
         { ...config, render_badge: false, render_instructor: false, render_subtitle: false }
       );
       setPreviewUrl(previewImageUrl);
       toast.success('Preview ready!', { id: 'preview' });
 
     } catch (error: any) {
-      console.error('Error processing content:', error);
-      const msg = error.response?.data?.detail || 'Failed to process content. Please try again.';
-      toast.error(msg, { id: 'parse', duration: 5000 });
+      console.error('❌ [App] handleProcessContent CRITICAL ERROR:', error);
+      const msg = error.response?.data?.detail || error.message || 'Failed to process content. Please try again.';
+      toast.error(msg, { id: 'parse', duration: 7000 });
       setAppState('upload');
+    }
+  };
+
+  // Confirm reviewed content and generate preview
+  const handleConfirmContent = async (confirmedQuestions: Question[]) => {
+    if (!backgroundFile || confirmedQuestions.length === 0) return;
+
+    // Renumber
+    const renumbered = confirmedQuestions.map((q, idx) => ({ ...q, number: idx + 1 }));
+    setQuestions(renumbered);
+    setAppState('preview');
+
+    try {
+      toast.loading('Generating preview...', { id: 'preview' });
+      const previewImageUrl = await generatePreview(
+        backgroundFile,
+        renumbered[0],
+        { ...config, render_badge: false, render_instructor: false, render_subtitle: false }
+      );
+      setPreviewUrl(previewImageUrl);
+      toast.success('Preview ready!', { id: 'preview' });
+    } catch (error: any) {
+      console.error('Error generating preview:', error);
+      toast.error('Failed to generate preview', { id: 'preview' });
+    }
+  };
+
+  // Trigger file picker for adding more images
+  const handleAddMoreImages = () => {
+    addMoreImagesRef.current?.click();
+  };
+
+  // When user picks more images from the hidden input
+  const handleMoreImagesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsParsingMore(true);
+    try {
+      toast.loading('Parsing new images...', { id: 'parse-more' });
+      const parsed = await parseImages(Array.from(files));
+      const newQuestions = parsed.questions || [];
+
+      if (newQuestions.length === 0) {
+        toast.error('No questions found in those images.', { id: 'parse-more' });
+        return;
+      }
+
+      setQuestions(prev => {
+        const lastNum = prev.length > 0 ? (prev[prev.length - 1].number || prev.length) : 0;
+        const adjustedNew = newQuestions.map((q: any, idx: number) => ({
+          ...q,
+          number: lastNum + idx + 1
+        }));
+        return [...prev, ...adjustedNew];
+      });
+
+      toast.success(`Added ${newQuestions.length} more questions!`, { id: 'parse-more' });
+    } catch (error: any) {
+      console.error('Error parsing more images:', error);
+      toast.error('Failed to parse additional images', { id: 'parse-more' });
+    } finally {
+      setIsParsingMore(false);
+      // Reset the file input
+      if (addMoreImagesRef.current) addMoreImagesRef.current.value = '';
     }
   };
 
@@ -303,7 +426,7 @@ function App() {
     const controller = new AbortController();
 
     const updatePreview = async () => {
-      if (!backgroundFile || (!docxFile && !inputText) || questions.length === 0) return;
+      if (!backgroundFile || questions.length === 0) return;
 
       console.log('Fetching new preview...');
       setIsPreviewLoading(true);
@@ -332,7 +455,11 @@ function App() {
   }, [triggerPreview]); // Run ONLY on manual trigger 
 
   // Check if ready to generate preview
-  const canGeneratePreview = backgroundFile && ((inputMode === 'file' && docxFile) || (inputMode === 'text' && inputText.trim().length > 0)) && appState === 'upload';
+  const canGeneratePreview = backgroundFile && (
+    (inputMode === 'file' && docxFile) ||
+    (inputMode === 'text' && inputText.trim().length > 0) ||
+    (inputMode === 'images' && inputImages.length > 0)
+  ) && (appState === 'upload' || appState === 'preview');
 
   // RENDER HELPERS
   const renderSidebar = () => (
@@ -388,26 +515,50 @@ function App() {
                 >
                   <img src="/backgrounds/blackboard_preset.jpg" className="w-full h-full object-cover opacity-70 group-hover:opacity-100 transition-opacity" alt="Blackboard" />
                 </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      const response = await fetch('/backgrounds/dark_green_shots.png');
+                      const blob = await response.blob();
+                      const file = new File([blob], "dark_green_shots.png", { type: "image/png" });
+                      setBackgroundFile(file);
+                      toast.success("Dark Green preset loaded!");
+                    } catch (e) {
+                      toast.error("Failed to load preset");
+                    }
+                  }}
+                  className="group relative w-16 h-10 rounded-md border border-white/10 hover:border-accent-mint overflow-hidden transition-all hover:shadow-[0_0_10px_rgba(100,220,180,0.3)]"
+                  title="Dark Green Style"
+                >
+                  <img src="/backgrounds/dark_green_shots.png" className="w-full h-full object-cover opacity-70 group-hover:opacity-100 transition-opacity" alt="Dark Green" />
+                </button>
               </div>
             </div>
 
             <div className="w-full h-px bg-white/5"></div>
 
             {/* Tabs for Input Mode */}
-            <div className="grid grid-cols-2 gap-1 p-1 bg-black/40 rounded-lg mx-1 mt-2">
+            <div className={`grid ${inputMode === 'images' ? 'grid-cols-3' : 'grid-cols-3'} gap-1 p-1 bg-black/40 rounded-lg mx-1 mt-2`}>
               <button
                 onClick={() => setInputMode('file')}
-                className={`py-2 px-3 rounded-md text-xs font-semibold flex items-center justify-center space-x-2 transition-all ${inputMode === 'file' ? 'bg-white/10 text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}
+                className={`py-2 px-1 rounded-md text-[10px] font-semibold flex flex-col items-center justify-center transition-all ${inputMode === 'file' ? 'bg-white/10 text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}
               >
-                <Upload className="w-3 h-3" />
-                <span>Upload File</span>
+                <Upload className="w-3 h-3 mb-1" />
+                <span>File</span>
               </button>
               <button
                 onClick={() => setInputMode('text')}
-                className={`py-2 px-3 rounded-md text-xs font-semibold flex items-center justify-center space-x-2 transition-all ${inputMode === 'text' ? 'bg-white/10 text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}
+                className={`py-2 px-1 rounded-md text-[10px] font-semibold flex flex-col items-center justify-center transition-all ${inputMode === 'text' ? 'bg-white/10 text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}
               >
-                <FileText className="w-3 h-3" />
-                <span>Paste Text</span>
+                <FileText className="w-3 h-3 mb-1" />
+                <span>Text</span>
+              </button>
+              <button
+                onClick={() => setInputMode('images')}
+                className={`py-2 px-1 rounded-md text-[10px] font-semibold flex flex-col items-center justify-center transition-all ${inputMode === 'images' ? 'bg-white/10 text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}
+              >
+                <ImageIcon className="w-3 h-3 mb-1" />
+                <span>Images</span>
               </button>
             </div>
 
@@ -419,7 +570,7 @@ function App() {
                 file={docxFile}
                 icon="document"
               />
-            ) : (
+            ) : inputMode === 'text' ? (
               <div className="p-2">
                 <label className="text-xs text-gray-400 uppercase font-semibold block mb-2 px-1">Raw Content</label>
                 <textarea
@@ -428,6 +579,40 @@ function App() {
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
                 />
+              </div>
+            ) : (
+              <div className="p-2 space-y-3">
+                <label className="text-xs text-gray-400 uppercase font-semibold block px-1">Question Images</label>
+                <div className="grid grid-cols-1 gap-2">
+                  <FileUpload
+                    label="Add Question Image"
+                    accept=".jpg,.jpeg,.png"
+                    onFileSelect={(file) => {
+                      if (file) setInputImages(prev => [...prev, file]);
+                    }}
+                    file={null}
+                    icon="image"
+                  />
+
+                  {inputImages.length > 0 && (
+                    <div className="space-y-2 mt-2 max-h-48 overflow-y-auto custom-scrollbar pr-1">
+                      {inputImages.map((file, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-2 bg-white/5 rounded-lg border border-white/10 group">
+                          <div className="flex items-center space-x-2 overflow-hidden">
+                            <ImageIcon className="w-3 h-3 text-accent-orange flex-shrink-0" />
+                            <span className="text-[10px] text-gray-300 truncate">{file.name}</span>
+                          </div>
+                          <button
+                            onClick={() => setInputImages(prev => prev.filter((_, i) => i !== idx))}
+                            className="text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -445,8 +630,19 @@ function App() {
           )}
         </div>
 
+        {/* Config Panel + Content Layout */}
         <div>
           <ConfigPanel config={config} onChange={setConfig} />
+
+          {/* Content Layout Selector - collapsible section */}
+          <div className="p-4 border-t border-white/5">
+            <ContentLayoutSelector
+              region={config.content_region || 'full'}
+              scale={config.content_scale || 1.0}
+              onRegionChange={(region) => setConfig(prev => ({ ...prev, content_region: region as any }))}
+              onScaleChange={(scale) => setConfig(prev => ({ ...prev, content_scale: scale }))}
+            />
+          </div>
         </div>
       </div>
 
@@ -461,6 +657,10 @@ function App() {
             <LayoutGrid className="w-5 h-5 mr-2" />
             <span className="text-lg">Review All Slides</span>
           </button>
+        ) : appState === 'content-review' ? (
+          <div className="text-sm text-gray-400 text-center">
+            Review and edit your questions above, then confirm to generate slides.
+          </div>
         ) : appState === 'review' ? (
           <div className="text-center text-gray-400 text-sm">
             Reviewing slides...
@@ -497,15 +697,24 @@ function App() {
         error: { iconTheme: { primary: '#f87171', secondary: '#1e293b' } },
       }} />
 
-      {/* Sidebar is always visible except when reviewing? No, always visible is good for config tweaking */}
-      {/* If reviewing, maybe hide sidebar or keep it? Let's hide it to give max space for grid */}
-      {appState !== 'review' && renderSidebar()}
+      {/* Sidebar is always visible except when reviewing */}
+      {appState !== 'review' && appState !== 'content-review' && renderSidebar()}
+
+      {/* Hidden file input for adding more images during content review */}
+      <input
+        ref={addMoreImagesRef}
+        type="file"
+        accept=".jpg,.jpeg,.png"
+        multiple
+        className="hidden"
+        onChange={handleMoreImagesSelected}
+      />
 
       {/* RIGHT MAIN AREA */}
-      <div className={`flex-1 bg-[#0f111a] relative overflow-hidden flex flex-col ${appState === 'review' ? '' : 'items-center justify-center p-12'}`}>
+      <div className={`flex-1 bg-[#0f111a] relative overflow-hidden flex flex-col ${appState === 'review' || appState === 'content-review' ? '' : 'items-center justify-center p-12'}`}>
 
         {/* Background Effects (Only in preview/home mode) */}
-        {appState !== 'review' && (
+        {appState !== 'review' && appState !== 'content-review' && (
           <>
             <div className="absolute top-[-20%] right-[-10%] w-[600px] h-[600px] bg-accent-orange/5 rounded-full blur-[120px] pointer-events-none"></div>
             <div className="absolute bottom-[-20%] left-[-10%] w-[600px] h-[600px] bg-accent-mint/5 rounded-full blur-[120px] pointer-events-none"></div>
@@ -515,16 +724,35 @@ function App() {
           </>
         )}
 
-        {appState === 'review' ? (
-          <SlideGrid
-            previews={batchPreviews}
-            isLoading={isBatchLoading}
-            onPageChange={handleStartReview}
-            onEditSlide={setEditingSlideIndex}
-            onGeneratePPTX={handleGenerateAll}
-            onClose={() => setAppState('preview')}
-            onInsertSlide={handleInsertSlide}
-          />
+        {appState === 'content-review' ? (
+          <div className="flex h-full">
+            {/* Left: Sidebar with controls */}
+            {renderSidebar()}
+
+            {/* Right: Content Review Panel */}
+            <div className="flex-1 flex flex-col bg-[#0d0f17] border-l border-white/5">
+              <ErrorBoundary name="ParsedContentReview">
+                <ParsedContentReview
+                  questions={questions}
+                  onConfirm={handleConfirmContent}
+                  onAddMoreImages={handleAddMoreImages}
+                  isParsingMore={isParsingMore}
+                />
+              </ErrorBoundary>
+            </div>
+          </div>
+        ) : appState === 'review' ? (
+          <ErrorBoundary name="SlideGrid">
+            <SlideGrid
+              previews={batchPreviews}
+              isLoading={isBatchLoading}
+              onPageChange={handleStartReview}
+              onEditSlide={setEditingSlideIndex}
+              onGeneratePPTX={handleGenerateAll}
+              onClose={() => setAppState('preview')}
+              onInsertSlide={handleInsertSlide}
+            />
+          </ErrorBoundary>
         ) : (
           <div className="relative z-10 w-full max-w-[1400px] flex flex-col h-full">
             {previewUrl ? (

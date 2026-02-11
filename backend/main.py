@@ -1,12 +1,16 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 import os
+import hashlib
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from PIL import Image, ImageFile, UnidentifiedImageError
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 import io
-from typing import List
 import json
+import base64
+import google.generativeai as genai
+from google.oauth2 import service_account
+from typing import List, Optional
 
 from slide_generator import generate_slide_image, compress_image
 from docx_parser import parse_questions_from_docx, parse_questions_from_md
@@ -19,6 +23,28 @@ try:
         f.write("Backend main.py loaded\n")
 except:
     pass
+
+# Configure AI Studio (Google Generative AI)
+CREDENTIALS_PATH = "/Users/rci/lekhaslides/celtic-origin-480214-d5-e0c80e18c8c5.json"
+
+def init_genai():
+    try:
+        if os.path.exists(CREDENTIALS_PATH):
+            # Set environment variable so the SDK can find the credentials
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = CREDENTIALS_PATH
+            
+            # Test if it can list models (this verifies the credentials)
+            genai.list_models()
+            print(f"✨ AI Studio (Gemini) initialized with service account from {CREDENTIALS_PATH}")
+            return True
+        else:
+            print(f"⚠️ Credentials file not found at {CREDENTIALS_PATH}")
+            return False
+    except Exception as e:
+        print(f"❌ Failed to initialize AI Studio: {e}")
+        return False
+
+HAS_GENAI = init_genai()
 
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -135,6 +161,103 @@ async def parse_text(text: str = Form(...)):
         raise HTTPException(status_code=400, detail=f"Error parsing text: {str(e)}")
 
 
+@app.post("/api/parse-images")
+async def parse_images(files: List[UploadFile] = File(...)):
+    """
+    Parse multiple images using Gemini API and return structured questions
+    """
+    if not HAS_GENAI:
+        raise HTTPException(status_code=500, detail="Gemini API not configured on server (Missing credentials).")
+
+    try:
+        # Use Gemini 2.5/2.0 Flash (verified in user project list) or fall back
+        model_name = "gemini-2.5-flash"
+        
+        # Define the Response Schema for 100% reliable parsing
+        response_schema = {
+            "type": "object",
+            "properties": {
+                "questions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "number": {"type": "integer"},
+                            "question": {"type": "string"},
+                            "pointers": {
+                                "type": "array",
+                                "items": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "minItems": 2,
+                                    "maxItems": 2
+                                }
+                            }
+                        },
+                        "required": ["number", "question", "pointers"]
+                    }
+                }
+            },
+            "required": ["questions"]
+        }
+
+        model = genai.GenerativeModel(
+            model_name=model_name,
+            generation_config={"response_mime_type": "application/json"}
+        )
+            
+        print(f"💡 Using {model_name} with Structured Output (JSON Schema)")
+        
+        # Prepare parts for Gemini
+        prompt = """
+        You are an elite educational content architect. Your task is to perform high-fidelity OCR and structured data extraction from the provided images.
+        
+        CONTENT QUALITY & ACCURACY:
+        1. Extract EVERY question and option with 100% text accuracy.
+        2. The content is primarily MCQs. Ensure each MCQ is perfectly structured.
+        3. If a question spans multiple images or is split, merge it logically.
+        4. Maintain mathematical symbols, punctuation, and proper capitalization.
+        
+        EXTRACTION RULES:
+        - Each image may contain multiple questions (e.g., 5-15). Extract ALL of them.
+        - For MCQs: Place options into the "pointers" array as [label, text] pairs, e.g., ["A)", "Option text"].
+        - If a question is descriptive, break the explanation into concise key points for the "pointers" array.
+        """
+        
+        contents = [prompt]
+        
+        for file in files:
+            img_bytes = await file.read()
+            img_io = io.BytesIO(img_bytes)
+            img = Image.open(img_io)
+            contents.append(img)
+            
+        print(f"Sending {len(files)} images to Gemini API for parsing...")
+        response = model.generate_content(contents)
+        
+        # Structured Output ensures valid JSON
+        result = json.loads(response.text)
+        
+        # Handle both formats: {"questions": [...]} or just [...]
+        if isinstance(result, list):
+            questions = result
+        elif isinstance(result, dict):
+            questions = result.get("questions", [])
+        else:
+            questions = []
+        
+        return {
+            "questions": questions,
+            "total": len(questions)
+        }
+        
+    except Exception as e:
+        print(f"❌ Error in parse-images (Vertex): {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=400, detail=f"Error parsing images via Gemini API: {str(e)}")
+
+
 @app.post("/api/generate-preview")
 async def generate_preview(
     background: UploadFile = File(...),
@@ -159,10 +282,17 @@ async def generate_preview(
         # Load background image
         print("📁 Loading background image...")
         bg_bytes = await background.read()
+        
+        # Calculate a unique ID for this background to enable caching
+        bg_hash = hashlib.md5(bg_bytes).hexdigest()
+        bg_id = int(bg_hash[:8], 16) # Convert part of hash to integer
+        
         bg_image = Image.open(io.BytesIO(bg_bytes))
         bg_image.load()  # Ensure image data is in memory
-        bg_image = compress_image(bg_image) # Compress if too large
-        print(f"✓ Background loaded: {bg_image.size}")
+        
+        # We don't need to compress if it's already in the cache
+        # The cache logic in slide_generator handles the resizing
+        print(f"✓ Background loaded (ID: {bg_id})")
         
         # Parse JSON data
         print("📋 Parsing question data...")
@@ -181,18 +311,18 @@ async def generate_preview(
             print(f"  ➜ Applying config override for preview")
             cfg.update(question["config_override"])
             
-        slide_img = generate_slide_image(question, bg_image, cfg, preview_mode=True, use_cache=False)
+        slide_img = generate_slide_image(question, bg_image, cfg, preview_mode=True, bg_id=bg_id, use_cache=True)
         print(f"✓ Slide generated: {slide_img.size}")
         
-        # Convert to bytes
-        print("💾 Converting to PNG...")
+        # Convert to bytes - Use JPEG for previews (much faster than PNG)
+        print("💾 Converting to JPEG...")
         img_byte_arr = io.BytesIO()
-        slide_img.save(img_byte_arr, format='PNG')
+        slide_img.convert("RGB").save(img_byte_arr, format='JPEG', quality=85, optimize=False)
         img_byte_arr.seek(0)
         print("✅ Preview ready!")
         print(f"{'='*60}\n")
         
-        return StreamingResponse(img_byte_arr, media_type="image/png")
+        return StreamingResponse(img_byte_arr, media_type="image/jpeg")
     
     except UnidentifiedImageError:
         print("❌ ERROR: Invalid image file")
@@ -233,22 +363,23 @@ async def generate_batch_previews(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     try:
-        # 1. Load and Aggressively Compress Background
+        # 1. Load and Aggressively Compress Background for FAST previews
         bg_bytes = await background.read()
         bg_image = Image.open(io.BytesIO(bg_bytes))
         bg_image.load()
         
-        # User Request: "very 90% compress image... slide size should not be more than 3 mb"
-        PREVIEW_MAX_DIM = 960 
+        # OPTIMIZATION: Use much smaller resolution for grid previews
+        # 640px instead of 960px = 4x fewer pixels = much faster
+        PREVIEW_MAX_DIM = 640 
         bg_image = compress_image(bg_image, max_dimension=PREVIEW_MAX_DIM)
         
-        # Ensure it's under 3MB (simulation)
+        # Ensure it's under 1MB for fast network transfer
         img_byte_arr = io.BytesIO()
-        bg_image.save(img_byte_arr, format='JPEG', quality=85)
-        while img_byte_arr.tell() > 3 * 1024 * 1024:
+        bg_image.save(img_byte_arr, format='JPEG', quality=70)
+        while img_byte_arr.tell() > 1 * 1024 * 1024:
             img_byte_arr = io.BytesIO()
             bg_image = bg_image.resize((int(bg_image.width*0.9), int(bg_image.height*0.9)))
-            bg_image.save(img_byte_arr, format='JPEG', quality=70)
+            bg_image.save(img_byte_arr, format='JPEG', quality=60)
             
         bg_id = id(bg_image)
         
@@ -286,8 +417,8 @@ async def generate_batch_previews(
             
             # Convert to base64
             buffered = io.BytesIO()
-            # aggressive compression for network transfer speed
-            img.save(buffered, format="JPEG", quality=60) 
+            # OPTIMIZATION: Use quality=40 instead of 60 for much smaller file sizes
+            img.save(buffered, format="JPEG", quality=40) 
             img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
             
             return {

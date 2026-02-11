@@ -24,16 +24,17 @@ def get_cached_font(font_path: str, size: int) -> ImageFont.FreeTypeFont:
 # Cache for resized backgrounds
 _bg_cache: Dict[Tuple[int, int, int], Image.Image] = {}
 
-def get_resized_background(background: Image.Image, width: int, height: int, bg_id: int, use_cache: bool = True) -> Image.Image:
+def get_resized_background(background: Image.Image, width: int, height: int, bg_id: int, use_cache: bool = True, fast: bool = False) -> Image.Image:
     """Cache resized backgrounds to avoid re-resizing for every slide"""
     if not use_cache:
-        resample = Image.Resampling.BILINEAR if width < 1920 else Image.Resampling.LANCZOS
+        resample = Image.Resampling.BILINEAR if fast else Image.Resampling.LANCZOS
         return background.resize((width, height), resample).convert("RGB")
 
     key = (bg_id, width, height)
     with _bg_lock:
         if key not in _bg_cache:
-            resample = Image.Resampling.BILINEAR if width < 1920 else Image.Resampling.LANCZOS
+            # For the first resize, we can use BILINEAR if requested, but LANCZOS is okay for cache since it happens once
+            resample = Image.Resampling.BILINEAR if fast else Image.Resampling.LANCZOS
             _bg_cache[key] = background.resize((width, height), resample).convert("RGB")
         return _bg_cache[key].copy()
 
@@ -160,6 +161,9 @@ def wrap_text(text: str, max_width: int, font: ImageFont.FreeTypeFont,
     return lines
 
 
+import base64
+from io import BytesIO
+
 def generate_slide_image(question: Dict, background: Image.Image, 
                          config: Dict, preview_mode: bool = False,
                          bg_id: int = 0, use_cache: bool = True) -> Image.Image:
@@ -185,7 +189,7 @@ def generate_slide_image(question: Dict, background: Image.Image,
     scale = 0.5 if preview_mode else 1.0
 
     # Use cached resized background
-    bg = get_resized_background(background, TARGET_WIDTH, TARGET_HEIGHT, bg_id, use_cache=use_cache)
+    bg = get_resized_background(background, TARGET_WIDTH, TARGET_HEIGHT, bg_id, use_cache=use_cache, fast=preview_mode)
     draw = ImageDraw.Draw(bg, "RGBA")
     
     # Configurable Layout Parameters (scaled)
@@ -249,20 +253,78 @@ def generate_slide_image(question: Dict, background: Image.Image,
     except:
         custom_color = YELLOW
         
+    # Content Scale (relative font sizing)
+    content_scale_factor = float(config.get('content_scale', 1.0))
+    FONT_SIZE_HEADING = int(FONT_SIZE_HEADING * content_scale_factor)
+    FONT_SIZE_BODY = int(FONT_SIZE_BODY * content_scale_factor)
+    
+    # Re-compute scaled fonts with content_scale
+    if font_path:
+        font_heading = get_cached_font(font_path, FONT_SIZE_HEADING)
+        font_subtitle = get_cached_font(font_path, int(FONT_SIZE_HEADING * 0.5))
+        font_question = get_cached_font(font_path, int(FONT_SIZE_HEADING * 0.8))
+        font_bullet = get_cached_font(font_path, FONT_SIZE_BODY)
+        font_label = get_cached_font(font_path, int(FONT_SIZE_BODY * 1.1))
+
     # Standard margins (scaled)
     BASE_MARGIN_LEFT = 80 * scale
     BASE_MARGIN_TOP = 60 * scale
     SAFE_MARGIN_RIGHT = 80 * scale
 
-    # Margins
-    margin_left = BASE_MARGIN_LEFT + POS_OFFSET_X
+    # Content Region - determines the area where question content is rendered
+    content_region = config.get('content_region', 'full')
+    
+    # Calculate region bounds (affects margin_left and width_limit)
+    if content_region == 'left-half':
+        region_left = BASE_MARGIN_LEFT
+        region_right = TARGET_WIDTH * 0.5
+    elif content_region == 'right-half':
+        region_left = TARGET_WIDTH * 0.5 + BASE_MARGIN_LEFT * 0.5
+        region_right = TARGET_WIDTH - SAFE_MARGIN_RIGHT
+    elif content_region == 'left-third':
+        region_left = BASE_MARGIN_LEFT
+        region_right = TARGET_WIDTH * 0.333
+    elif content_region == 'center-third':
+        region_left = TARGET_WIDTH * 0.333 + BASE_MARGIN_LEFT * 0.3
+        region_right = TARGET_WIDTH * 0.666
+    elif content_region == 'right-third':
+        region_left = TARGET_WIDTH * 0.666 + BASE_MARGIN_LEFT * 0.3
+        region_right = TARGET_WIDTH - SAFE_MARGIN_RIGHT
+    else:  # 'full'
+        region_left = BASE_MARGIN_LEFT
+        region_right = TARGET_WIDTH - SAFE_MARGIN_RIGHT
+
+    # Margins adjusted by region
+    margin_left = region_left + POS_OFFSET_X
     margin_top = BASE_MARGIN_TOP + POS_OFFSET_Y
-    width_limit = TARGET_WIDTH - SAFE_MARGIN_RIGHT
+    width_limit = region_right
     
     # Wrap width calculation
-    # available width = total width - left margin - right margin
-    # We keep right margin static from the edge, but left margin moves with offset
     content_width = width_limit - margin_left
+
+    # === QUESTION IMAGE (OPTIONAL) ===
+    q_image = None
+    if "image" in question and question["image"]:
+        try:
+            img_data = question["image"]
+            if "base64," in img_data:
+                img_data = img_data.split("base64,")[1]
+            
+            q_image_bytes = base64.b64decode(img_data)
+            q_image = Image.open(BytesIO(q_image_bytes))
+            
+            # Resize image to fit a portion of the slide
+            # Max dimensions: 40% width, 40% height
+            max_w = int(TARGET_WIDTH * 0.45)
+            max_h = int(TARGET_HEIGHT * 0.45)
+            
+            q_image.thumbnail((max_w, max_h), Image.Resampling.LANCZOS)
+            
+            # Reduce content width if image is present
+            content_width = int(content_width * 0.55)
+        except Exception as e:
+            print(f"⚠️ Failed to load question image: {e}")
+            q_image = None
     
     # === HEADER ===
     # Instructor name (top-left)
@@ -343,12 +405,18 @@ def generate_slide_image(question: Dict, background: Image.Image,
 
     # Position question below header (approx 200px gap in original, let's make it relative)
     question_y = margin_top + FONT_SIZE_HEADING + 100 * scale
-    question_text = f"Ques {question['number']} => {question['question']}"
+    question_text = f"→ {question['question']}"
     question_lines = wrap_text(question_text, content_width, font_question, draw)
     
     for i, line in enumerate(question_lines):
         draw.text((margin_left, question_y + i * (font_question.size * 1.2)), line,
                   font=font_question, fill=ORANGE)
+    
+    # Draw question image if present (on the right)
+    if q_image:
+        img_x = TARGET_WIDTH - SAFE_MARGIN_RIGHT - q_image.width
+        img_y = question_y
+        bg.paste(q_image, (int(img_x), int(img_y)))
     
     # === ANSWER LABEL ===
     answer_y = question_y + len(question_lines) * (font_question.size * 1.2) + 40 * scale

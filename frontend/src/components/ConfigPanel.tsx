@@ -107,7 +107,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange }) =>
 
                 <div>
                     <div className="flex justify-between mb-1">
-                        <label className="text-xs text-gray-400 uppercase font-semibold">Heading Size</label>
+                        <label className="text-xs text-gray-400 uppercase font-semibold">Question Size</label>
                         <span className="text-xs text-accent-yellow">{config.font_size_heading || 60}px</span>
                     </div>
                     <input
@@ -121,7 +121,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange }) =>
                 </div>
                 <div>
                     <div className="flex justify-between mb-1">
-                        <label className="text-xs text-gray-400 uppercase font-semibold">Body Size</label>
+                        <label className="text-xs text-gray-400 uppercase font-semibold">Options Size</label>
                         <span className="text-xs text-accent-mint">{config.font_size_body || 28}px</span>
                     </div>
                     <input

@@ -4,3 +4,5 @@ python-pptx
 python-docx
 Pillow
 python-multipart
+google-cloud-aiplatform
+google-auth

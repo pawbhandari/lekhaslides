@@ -3,6 +3,7 @@ export interface Question {
     question: string;
     pointers: [string, string][];
     config_override?: Partial<Config>;
+    image?: string; // base64 string
 }
 
 export interface Config {
@@ -40,6 +41,10 @@ export interface Config {
     instructor_rotation?: number;
     subtitle_rotation?: number;
     badge_rotation?: number;
+
+    // Content Layout
+    content_region?: 'full' | 'left-half' | 'right-half' | 'left-third' | 'center-third' | 'right-third';
+    content_scale?: number; // 0.5 to 2.0, default 1.0
 }
 
 export interface ParsedDocxResponse {
