@@ -1,7 +1,8 @@
 import axios from 'axios';
 import type { ParsedDocxResponse, Question, Config } from '../types';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const raw_url = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_URL = raw_url.endsWith('/') ? raw_url.slice(0, -1) : raw_url;
 
 const isDev = import.meta.env.DEV;
 
