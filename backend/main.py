@@ -709,36 +709,47 @@ async def generate_pptx(
             # Send initial event
             yield f"data: {json.dumps({'type': 'start', 'total': total})}\n\n"
             
-            # Generate slides with parallel processing for speed
-            slide_images = [None] * total
-            completed = 0
+            # Build PPTX sequentially to save memory
+            from pptx import Presentation
+            from pptx.util import Inches
             
-            # Use ThreadPool for parallel generation (with caching, this is very fast)
-            def generate_one(idx_question):
-                idx, question = idx_question
+            prs = Presentation()
+            prs.slide_width = Inches(13.333)
+            prs.slide_height = Inches(7.5)
+            
+            # Process each question one by one
+            for i, question in enumerate(questions):
                 # Check for per-slide config override
                 current_cfg = cfg.copy()
                 if "config_override" in question:
                     current_cfg.update(question["config_override"])
                 
-                return idx, generate_slide_image(question, bg_image, current_cfg, bg_id=bg_id)
-            
-            # Process in batches of 4 for parallelism
-            with ThreadPoolExecutor(max_workers=4) as executor:
-                futures = {executor.submit(generate_one, (i, q)): i 
-                          for i, q in enumerate(questions)}
+                # Generate single high-res slide
+                slide_img = generate_slide_image(question, bg_image, current_cfg, bg_id=bg_id)
                 
-                for future in as_completed(futures):
-                    idx, img = future.result()
-                    slide_images[idx] = img
-                    completed += 1
-                    
-                    # Send progress event
-                    progress = {"type": "progress", "current": completed, "total": total, "percent": round((completed/total)*100)}
-                    yield f"data: {json.dumps(progress)}\n\n"
-            
-            # Build PPTX
-            pptx_bytes_io = create_pptx_from_images(slide_images)
+                # Convert to JPEG bytes immediately
+                img_byte_arr = io.BytesIO()
+                slide_img.convert('RGB').save(img_byte_arr, format='JPEG', quality=85, optimize=True)
+                img_byte_arr.seek(0)
+                
+                # Add to PPTX
+                slide_layout = prs.slide_layouts[6]  # Blank
+                slide = prs.slides.add_slide(slide_layout)
+                slide.shapes.add_picture(img_byte_arr, Inches(0), Inches(0), width=prs.slide_width, height=prs.slide_height)
+                
+                # Progress update
+                completed = i + 1
+                progress = {"type": "progress", "current": completed, "total": total, "percent": round((completed/total)*100)}
+                yield f"data: {json.dumps(progress)}\n\n"
+                
+                # Explicitly clean up image object
+                del slide_img
+                img_byte_arr.close()
+
+            # Save final PPTX
+            pptx_bytes_io = io.BytesIO()
+            prs.save(pptx_bytes_io)
+            pptx_bytes_io.seek(0)
             pptx_bytes = pptx_bytes_io.read()
             
             # Encode as base64 for SSE delivery
