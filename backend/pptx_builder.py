@@ -2,7 +2,10 @@ from pptx import Presentation
 from pptx.util import Inches
 from PIL import Image
 import io
+import logging
 from typing import List
+
+logger = logging.getLogger("lekhaslides.pptx")
 
 def create_pptx_from_images(images: List[Image.Image]) -> io.BytesIO:
     """
@@ -44,9 +47,9 @@ def create_pptx_from_images(images: List[Image.Image]) -> io.BytesIO:
                 width=prs.slide_width,
                 height=prs.slide_height
             )
-            print(f"✓ Added slide {idx+1}/{len(images)}")
+            logger.info(f"Added slide {idx+1}/{len(images)}")
         except Exception as e:
-            print(f"❌ Error adding slide {idx+1}: {str(e)}")
+            logger.error(f"Error adding slide {idx+1}: {str(e)}")
             raise
     
     # Save to BytesIO

@@ -1,6 +1,9 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 import os
-import hashlib
+import logging
+import asyncio
+import datetime
+import traceback
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from PIL import Image, ImageFile, UnidentifiedImageError
@@ -9,39 +12,41 @@ import io
 import json
 import base64
 import google.generativeai as genai
-from google.oauth2 import service_account
-from typing import List, Optional
+from typing import List, Dict, Optional
 
 from slide_generator import generate_slide_image, compress_image
 from docx_parser import parse_questions_from_docx, parse_questions_from_md
 from pptx_builder import create_pptx_from_images
+
+# Configure logging
+logger = logging.getLogger("lekhaslides")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 app = FastAPI(title="Lekhaslides API")
 
 try:
     with open("startup_log.txt", "w") as f:
         f.write("Backend main.py loaded\n")
-except:
+except Exception:
     pass
 
 # Configure AI Studio (Google Generative AI)
-CREDENTIALS_PATH = "/Users/rci/lekhaslides/frontend/celtic-origin-480214-d5-ad680edeae1e.json"
+CREDENTIALS_PATH = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 
 def init_genai():
     try:
-        if os.path.exists(CREDENTIALS_PATH):
-            # Set environment variable so the SDK can find the credentials
+        if CREDENTIALS_PATH and os.path.exists(CREDENTIALS_PATH):
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = CREDENTIALS_PATH
-            
-            # Test if it can list models (this verifies the credentials)
-            genai.list_models()
-            print(f"✨ AI Studio (Gemini) initialized with service account from {CREDENTIALS_PATH}")
+            logger.info(f"AI Studio (Gemini) initialized with credentials from env var")
             return True
+        elif CREDENTIALS_PATH:
+            logger.warning(f"Credentials file not found at path from GOOGLE_APPLICATION_CREDENTIALS")
+            return False
         else:
-            print(f"⚠️ Credentials file not found at {CREDENTIALS_PATH}")
+            logger.warning("GOOGLE_APPLICATION_CREDENTIALS env var not set. AI features disabled.")
             return False
     except Exception as e:
-        print(f"❌ Failed to initialize AI Studio: {e}")
+        logger.error(f"Failed to initialize AI Studio: {e}")
         return False
 
 HAS_GENAI = init_genai()
@@ -52,14 +57,7 @@ from fastapi import Request
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    import datetime
-    try:
-        with open("validation_error_log.txt", "w") as f:
-            f.write(f"Timestamp: {datetime.datetime.now()}\n")
-            f.write(f"URL: {request.url}\n")
-            f.write(f"Errors: {str(exc.errors())}\n")
-    except:
-        pass
+    logger.warning(f"Validation error on {request.url}: {exc.errors()}")
     return JSONResponse(
         status_code=422,
         content={"detail": exc.errors()},
@@ -72,8 +70,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key"],
 )
 
 # Middleware to limit file size (approximate, via Content-Length)
@@ -93,71 +91,219 @@ async def limit_upload_size(request: Request, call_next):
     response = await call_next(request)
     return response
 
+# Allowed file extensions for document parsing
+ALLOWED_DOC_EXTENSIONS = {'.docx', '.md', '.txt'}
+MAX_IMAGE_UPLOAD_COUNT = 20
+
+def extract_text_from_file(content: bytes, filename: str) -> str:
+    """
+    Extract raw text from a file (docx, md, txt).
+    For docx: extracts all paragraph text with line breaks preserved.
+    For md/txt: decodes bytes to string.
+    """
+    filename = filename.lower()
+    
+    if filename.endswith('.md') or filename.endswith('.txt'):
+        try:
+            return content.decode('utf-8')
+        except UnicodeDecodeError:
+            return content.decode('latin-1')
+    
+    # For docx: extract text using python-docx, preserving paragraph structure
+    try:
+        from docx import Document
+        doc = Document(io.BytesIO(content))
+        lines = []
+        for p in doc.paragraphs:
+            text = p.text.strip()
+            if text:
+                lines.append(text)
+        return '\n'.join(lines)
+    except Exception as e:
+        logger.warning(f"Failed to extract text from docx: {e}")
+        # Fallback: try as raw text
+        try:
+            return content.decode('utf-8')
+        except Exception:
+            return content.decode('latin-1')
+
+
+async def ai_parse_text(raw_text: str) -> List[Dict]:
+    """
+    Use Gemini to parse raw text into structured questions.
+    Returns a list of question dicts with {number, question, pointers}.
+    """
+    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    model = genai.GenerativeModel(
+        model_name=model_name,
+        generation_config={"response_mime_type": "application/json"}
+    )
+    
+    prompt = """You are an expert educational content parser. Parse the following raw text into structured JSON questions.
+
+OUTPUT FORMAT: Return a JSON object with a "questions" array. Each question must have:
+- "number": integer (question number, starting from 1)
+- "question": string (the full question text, including any inline math)
+- "pointers": array of [label, text] pairs
+
+CRITICAL RULES FOR MCQ OPTIONS:
+- The "label" (first element) must ONLY be the option letter+bracket, e.g.: "A)", "B)", "C)", "D)"
+- The "text" (second element) is the full option content
+- NEVER put the option content in the label field
+- NEVER put the option letter in the text field with empty label
+
+CORRECT example:
+  {"number": 1, "question": "What is 2+2?", "pointers": [["A)", "3"], ["B)", "4"], ["C)", "5"], ["D)", "6"]]}
+
+FOR NON-MCQ QUESTIONS (with bullet points or definitions):
+- Use the label for the category/key (e.g. "Definition:", "Key Point:")
+- Use the text for the explanation/value
+- If there's no label, use an empty string as label
+
+MATH FORMATTING:
+- Use $...$ for ALL inline math expressions (fractions, inequalities, etc.)
+- Ensure \\frac, \\leq, \\geq, \\infty, \\left, \\right etc. are correctly formatted
+
+QUESTION TEXT:
+- Always extract the complete question text into the "question" field
+- The "question" field must NEVER be empty
+- For MCQs, the question field is the stem (everything before A/B/C/D options)
+- Do NOT include options (A, B, C, D) in the question text
+
+IMPORTANT:
+- Extract EVERY question from the text, do not skip any
+- Maintain the original question numbering if present
+- If options are on the same line as the question, split them correctly
+
+Here is the text to parse:
+
+"""
+    
+    logger.info(f"Sending {len(raw_text)} chars to Gemini for AI parsing...")
+    
+    # Use asyncio-friendly timeout to avoid blocking the event loop
+    import functools
+    try:
+        loop = asyncio.get_event_loop()
+        response = await asyncio.wait_for(
+            loop.run_in_executor(None, functools.partial(model.generate_content, prompt + raw_text)),
+            timeout=60
+        )
+    except asyncio.TimeoutError:
+        raise Exception("AI parsing timed out after 60 seconds")
+    
+    # Safely parse AI response
+    try:
+        result = json.loads(response.text)
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error(f"Gemini returned invalid JSON: {e}. Response text: {response.text[:200]}")
+        raise Exception("AI returned invalid response format. Please try again.")
+    
+    if isinstance(result, list):
+        questions = result
+    elif isinstance(result, dict):
+        questions = result.get("questions", [])
+    else:
+        questions = []
+    
+    # Post-process: fix common AI output mistakes
+    questions = sanitize_questions(questions)
+    
+    logger.info(f"AI parsed {len(questions)} questions successfully")
+    return questions
+
+
 @app.post("/api/parse-docx")
 async def parse_docx(file: UploadFile = File(...)):
-    try:
-        with open("parse_request_log.txt", "a") as f:
-            import datetime
-            f.write(f"{datetime.datetime.now()}: Parse Request Received\n")
-    except:
-        pass
+    logger.info(f"Parse request received: {file.filename}")
     """
-    Parse .docx or .md/.txt file and return structured questions
-    
-    Returns: 
-    {
-        "questions": [
-            {
-                "number": 1,
-                "question": "Define Strategic Cost Management...",
-                "pointers": [
-                    ["Definition:", "SCM is the proactive use..."],
-                    ["Strategic Focus:", "It shifts the focus..."]
-                ]
-            }
-        ],
-        "total": 12
-    }
+    Parse .docx or .md/.txt file and return structured questions.
+    Uses AI (Gemini) for parsing with regex fallback.
     """
     try:
-        filename = file.filename.lower()
+        filename = file.filename.lower() if file.filename else ""
         if filename.endswith('.gdoc'):
              raise HTTPException(status_code=400, detail="Google Docs shortcut files (.gdoc) cannot be processed directly. Please open the document in Google Docs, go to File > Download > Microsoft Word (.docx), and upload that file.")
 
+        # Validate file extension
+        ext = os.path.splitext(filename)[1]
+        if ext and ext not in ALLOWED_DOC_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}. Allowed: {', '.join(ALLOWED_DOC_EXTENSIONS)}")
+
         content = await file.read()
         
+        # Primary: regex-based parsing (fast and reliable with br-aware XML parser)
+        logger.info("Using regex-based parsing (primary)")
         if filename.endswith('.md') or filename.endswith('.txt'):
             try:
                 text_content = content.decode('utf-8')
             except UnicodeDecodeError:
                 text_content = content.decode('latin-1')
-            
             questions = parse_questions_from_md(text_content)
         else:
-            # Default to docx
             questions = parse_questions_from_docx(content)
         
+        if questions:
+            logger.info(f"Regex parsed {len(questions)} questions")
+            return {
+                "questions": questions,
+                "total": len(questions)
+            }
+        
+        # Fallback: AI-powered parsing (if regex found nothing)
+        logger.info("Regex found 0 questions, trying AI parsing...")
+        if HAS_GENAI:
+            try:
+                raw_text = extract_text_from_file(content, filename)
+                logger.info(f"Extracted {len(raw_text)} chars from {filename}")
+                questions = await ai_parse_text(raw_text)
+                if questions:
+                    return {
+                        "questions": questions,
+                        "total": len(questions)
+                    }
+            except Exception as e:
+                logger.warning(f"AI parsing also failed: {e}")
+        
         return {
-            "questions": questions,
-            "total": len(questions)
+            "questions": [],
+            "total": 0
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error parsing docx: {str(e)}")
+        logger.error(f"Error parsing docx: {e}")
+        raise HTTPException(status_code=400, detail=f"Error parsing document: {str(e)}")
 
 
 @app.post("/api/parse-text")
 async def parse_text(text: str = Form(...)):
     """
-    Parse raw text input directly
+    Parse raw text input directly. Uses AI parsing with regex fallback.
     """
     try:
-        print(f"Parsing raw text input: {len(text)} chars")
+        logger.info(f"Parsing raw text input: {len(text)} chars")
+        
+        # Try AI parsing first
+        if HAS_GENAI:
+            try:
+                questions = await ai_parse_text(text)
+                if questions:
+                    return {
+                        "questions": questions,
+                        "total": len(questions)
+                    }
+            except Exception as e:
+                logger.warning(f"AI text parsing failed, falling back to regex: {e}")
+        
+        # Fallback: regex
         questions = parse_questions_from_md(text)
         return {
             "questions": questions,
             "total": len(questions)
         }
     except Exception as e:
+        logger.error(f"Error parsing text: {e}")
         raise HTTPException(status_code=400, detail=f"Error parsing text: {str(e)}")
 
 
@@ -243,15 +389,18 @@ async def parse_images(files: List[UploadFile] = File(...)):
     if not HAS_GENAI:
         raise HTTPException(status_code=500, detail="Gemini API not configured on server (Missing credentials).")
 
+    if len(files) > MAX_IMAGE_UPLOAD_COUNT:
+        raise HTTPException(status_code=400, detail=f"Too many images. Maximum {MAX_IMAGE_UPLOAD_COUNT} images allowed per request.")
+
     try:
-        model_name = "gemini-2.5-flash"
+        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
         
         model = genai.GenerativeModel(
             model_name=model_name,
             generation_config={"response_mime_type": "application/json"}
         )
             
-        print(f"💡 Using {model_name} with structured JSON output")
+        logger.info(f"Using {model_name} with structured JSON output")
         
         prompt = """You are an expert OCR and educational content extraction AI. Extract ALL questions from the provided images into structured JSON.
 
@@ -291,10 +440,14 @@ QUESTION TEXT:
             img = Image.open(img_io)
             contents.append(img)
             
-        print(f"Sending {len(files)} images to Gemini API for parsing...")
+        logger.info(f"Sending {len(files)} images to Gemini API for parsing...")
         response = model.generate_content(contents)
         
-        result = json.loads(response.text)
+        try:
+            result = json.loads(response.text)
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Gemini returned invalid JSON for images: {e}")
+            raise Exception("AI returned invalid response format. Please try again.")
         
         if isinstance(result, list):
             questions = result
@@ -312,9 +465,7 @@ QUESTION TEXT:
         }
         
     except Exception as e:
-        print(f"❌ Error in parse-images: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error in parse-images: {str(e)}", exc_info=True)
         raise HTTPException(status_code=400, detail=f"Error parsing images via Gemini API: {str(e)}")
 
 
@@ -330,80 +481,42 @@ async def generate_preview(
     
     Returns: PNG image
     """
-    print(f"\n{'='*60}")
-    print("📸 GENERATING PREVIEW")
+    logger.info("Generating preview")
     try:
-        with open("request_log.txt", "a") as f:
-            import datetime
-            f.write(f"{datetime.datetime.now()}: Preview Request Received\n")
-            
-        print(f"{'='*60}")
-        print(f"{'='*60}")
-        
         # Load background image
-        print("📁 Loading background image...")
         bg_bytes = await background.read()
         
-        # Calculate a unique ID for this background to enable caching
-        bg_hash = hashlib.md5(bg_bytes).hexdigest()
-        bg_id = int(bg_hash[:8], 16) # Convert part of hash to integer
+        # Use simple hash for caching
+        bg_id = hash(bg_bytes[:4096]) & 0xFFFFFFFF
         
         bg_image = Image.open(io.BytesIO(bg_bytes))
         bg_image.load()  # Ensure image data is in memory
         
-        # We don't need to compress if it's already in the cache
-        # The cache logic in slide_generator handles the resizing
-        print(f"✓ Background loaded (ID: {bg_id})")
-        
         # Parse JSON data
-        print("📋 Parsing question data...")
-        print(f"DEBUG: question_data raw value: {repr(question_data[:200] if len(question_data) > 0 else 'EMPTY')}")
-        print(f"DEBUG: config raw value: {repr(config[:200] if len(config) > 0 else 'EMPTY')}")
         question = json.loads(question_data)
         cfg = json.loads(config)
-        print(f"✓ Question {question.get('number')}: {question.get('question', '')[:50]}...")
-        print(f"✓ Config: {cfg.get('instructor_name')}")
+        logger.info(f"Preview for Q{question.get('number')}: {question.get('question', '')[:50]}")
         
         # Generate slide
-        print("🎨 Generating slide image...")
-        
         # Check for per-slide config override
         if "config_override" in question:
-            print(f"  ➜ Applying config override for preview")
             cfg.update(question["config_override"])
             
         slide_img = generate_slide_image(question, bg_image, cfg, preview_mode=True, bg_id=bg_id, use_cache=True)
-        print(f"✓ Slide generated: {slide_img.size}")
         
         # Convert to bytes - Use JPEG for previews (much faster than PNG)
-        print("💾 Converting to JPEG...")
         img_byte_arr = io.BytesIO()
         slide_img.convert("RGB").save(img_byte_arr, format='JPEG', quality=85, optimize=False)
         img_byte_arr.seek(0)
-        print("✅ Preview ready!")
-        print(f"{'='*60}\n")
+        logger.info("Preview ready")
         
         return StreamingResponse(img_byte_arr, media_type="image/jpeg")
     
     except UnidentifiedImageError:
-        print("❌ ERROR: Invalid image file")
         raise HTTPException(status_code=400, detail="Invalid image file. Please upload a valid JPG or PNG.")
         
     except Exception as e:
-        print(f"❌ ERROR generating preview: {str(e)}")
-        import traceback
-        import datetime
-        traceback.print_exc()
-        
-        # Write to log file for debugging
-        try:
-            with open("error_log.txt", "w") as f: # Overwrite to get latest
-                f.write(f"Timestamp: {datetime.datetime.now()}\n")
-                f.write(f"Error: {str(e)}\n")
-                traceback.print_exc(file=f)
-        except:
-             pass
-             
+        logger.error(f"Error generating preview: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error generating preview: {str(e)}")
 
 
@@ -504,9 +617,7 @@ async def generate_batch_previews(
         }
 
     except Exception as e:
-        print(f"❌ ERROR generating batch previews: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error generating batch previews: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -586,13 +697,10 @@ async def generate_pptx(
             clear_caches()
             
         except UnidentifiedImageError:
-            print("❌ ERROR: Invalid image file")
             yield f"data: {json.dumps({'type': 'error', 'message': 'Invalid image file. Please upload a valid JPG or PNG.'})}\n\n"
 
         except Exception as e:
-            print(f"❌ ERROR generating PPTX: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Error generating PPTX: {str(e)}", exc_info=True)
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
     
     return StreamingResponse(

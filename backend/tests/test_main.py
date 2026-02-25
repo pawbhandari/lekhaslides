@@ -42,7 +42,7 @@ def test_parse_docx_invalid_extension():
     # The backend (docx_parser.py) tries to parse it. 
     # If it fails, main.py catches Exception and returns 400.
     assert response.status_code == 400
-    assert "Error parsing docx" in response.json()["detail"]
+    assert "Unsupported file type" in response.json()["detail"]
 
 def test_parse_docx_gdoc():
     # Attempt to upload a .gdoc file
@@ -75,7 +75,7 @@ def test_generate_preview_valid():
         data={"question_data": question_data, "config": config}
     )
     assert response.status_code == 200
-    assert response.headers["content-type"] == "image/png"
+    assert response.headers["content-type"] == "image/jpeg"
 
 def test_generate_preview_invalid_image():
     # Sending text content as image

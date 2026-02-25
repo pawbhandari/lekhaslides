@@ -25,5 +25,14 @@ backend/*.pyc
 *.log
 *_log.txt
 startup_log.txt
+error_log.txt
+request_log.txt
+parse_request_log.txt
+validation_error_log.txt
 celtic-origin-*.json
 frontend/celtic-origin-*.json
+backend/celtic-origin-*.json
+
+# Credentials - NEVER commit these
+*.json.key
+service-account*.json

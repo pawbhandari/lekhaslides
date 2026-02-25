@@ -6,7 +6,7 @@ import { MathText } from './MathText';
 interface Props {
   questions: Question[];
   onConfirm: (questions: Question[]) => void;
-  onAddMoreImages: () => void;
+  onAddMoreImages?: () => void;
   isParsingMore: boolean;
 }
 
@@ -220,24 +220,26 @@ export function ParsedContentReview({ questions, onConfirm, onAddMoreImages, isP
 
       {/* Footer Actions */}
       <div className="px-4 py-4 border-t border-white/10 space-y-2 bg-[#151926]">
-        <button
-          onClick={onAddMoreImages}
-          disabled={isParsingMore}
-          className="w-full py-2.5 rounded-xl border border-white/10 hover:border-accent-mint/30 
-                   text-gray-300 hover:text-accent-mint text-sm flex items-center justify-center gap-2
-                   transition-all hover:bg-white/[0.02] disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isParsingMore ? (
-            <>
-              <div className="w-4 h-4 border-2 border-accent-mint/30 border-t-accent-mint rounded-full animate-spin" />
-              Parsing Images...
-            </>
-          ) : (
-            <>
-              <ImagePlus className="w-4 h-4" /> Add More Question Images
-            </>
-          )}
-        </button>
+        {onAddMoreImages && (
+          <button
+            onClick={onAddMoreImages}
+            disabled={isParsingMore}
+            className="w-full py-2.5 rounded-xl border border-white/10 hover:border-accent-mint/30 
+                     text-gray-300 hover:text-accent-mint text-sm flex items-center justify-center gap-2
+                     transition-all hover:bg-white/[0.02] disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isParsingMore ? (
+              <>
+                <div className="w-4 h-4 border-2 border-accent-mint/30 border-t-accent-mint rounded-full animate-spin" />
+                Parsing Images...
+              </>
+            ) : (
+              <>
+                <ImagePlus className="w-4 h-4" /> Add More Question Images
+              </>
+            )}
+          </button>
+        )}
 
         <button
           onClick={() => onConfirm(editableQuestions.filter(q => q.question?.trim()))}

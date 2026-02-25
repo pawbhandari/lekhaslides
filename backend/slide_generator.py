@@ -220,39 +220,37 @@ def render_math_to_image(formula: str, fontsize: int, color) -> Tuple[Image.Imag
 
         with _math_render_lock:
             dpi = 100
-            # PIL fontsize is in pixels. Matplotlib fontsize is in points (1/72 inch).
-            # At `dpi` DPI: 1 inch = dpi pixels, so 1 point = dpi/72 pixels.
-            # To get the same visual size: mpl_fontsize_pt = pil_pixels * 72 / dpi
             mpl_fontsize = fontsize * 72.0 / dpi
             
             fig = plt.figure(figsize=(10, 2), dpi=dpi)
-            fig.patch.set_alpha(0.0)
-            
-            t = fig.text(0, 0.5, math_str, fontsize=mpl_fontsize, color=mpl_color, va='baseline')
-            
-            fig.canvas.draw()
-            renderer = fig.canvas.get_renderer()
-            
-            bbox = t.get_window_extent(renderer=renderer)
-            
-            if bbox.width <= 0 or bbox.height <= 0:
+            try:
+                fig.patch.set_alpha(0.0)
+                
+                t = fig.text(0, 0.5, math_str, fontsize=mpl_fontsize, color=mpl_color, va='baseline')
+                
+                fig.canvas.draw()
+                renderer = fig.canvas.get_renderer()
+                
+                bbox = t.get_window_extent(renderer=renderer)
+                
+                if bbox.width <= 0 or bbox.height <= 0:
+                    return None, 0
+
+                baseline_y = fig.get_figheight() * dpi * 0.5
+                depth = baseline_y - bbox.y0
+                
+                buf = _io.BytesIO()
+                fig.savefig(buf, format='png', transparent=True, dpi=dpi, bbox_inches='tight', pad_inches=0)
+
+                buf.seek(0)
+                img = Image.open(buf).convert('RGBA')
+                
+                return img, int(depth)
+            finally:
                 plt.close(fig)
-                return None, 0
-
-            baseline_y = fig.get_figheight() * dpi * 0.5
-            depth = baseline_y - bbox.y0
-            
-            buf = _io.BytesIO()
-            fig.savefig(buf, format='png', transparent=True, dpi=dpi, bbox_inches='tight', pad_inches=0)
-            plt.close(fig)
-
-            buf.seek(0)
-            img = Image.open(buf).convert('RGBA')
-            
-            return img, int(depth)
 
     except Exception as e:
-        print(f"⚠️ Math render failed for '{formula}': {e}")
+        print(f"\u26a0\ufe0f Math render failed for '{formula}': {e}")
         return None, 0
 
 def draw_text_with_math(draw: ImageDraw.Draw, bg: Image.Image, text: str, 
@@ -651,7 +649,7 @@ def generate_slide_image(question: Dict, background: Image.Image,
 
     # Position question below header (approx 200px gap in original, let's make it relative)
     question_y = margin_top + FONT_SIZE_HEADING + 100 * scale
-    question_text = f"→ {question['question']}"
+    question_text = f"\u2192 {question.get('question', '')}"
     
     # Use the new rich text drawer with question color
     # Increased line_spacing_factor to 1.3 to give more space between question lines
@@ -681,7 +679,7 @@ def generate_slide_image(question: Dict, background: Image.Image,
     # Default 0, allow 0-100 pixels extra (scaled)
     pointer_spacing = int(int(config.get('pointer_spacing', 0)) * scale)
 
-    for label, text in question['pointers']:
+    for label, text in question.get('pointers', []):
         # First, figure out math content height to center labels vertically
         # We render a "probe" to get height - but that's slow, so we do a cheap estimate:
         # For single-line with fraction: ~1.44 * font_bullet.size
@@ -722,7 +720,7 @@ def generate_slide_image(question: Dict, background: Image.Image,
     watermark_text = config.get('watermark_text', '')
     if watermark_text:
         # Reuse subtitle font or load new one
-        watermark_font = ImageFont.truetype(font_path, int(30 * scale)) if 'font_path' in locals() else font_subtitle
+        watermark_font = get_cached_font(font_path, int(30 * scale)) if font_path else font_subtitle
         
         # Calculate size
         bbox = draw.textbbox((0, 0), watermark_text, font=watermark_font)

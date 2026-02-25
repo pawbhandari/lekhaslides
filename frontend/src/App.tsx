@@ -23,6 +23,7 @@ function App() {
   // File states
   const [backgroundFile, setBackgroundFile] = useState<File | null>(null);
   const [docxFile, setDocxFile] = useState<File | null>(null);
+  const [slideName, setSlideName] = useState('');
 
   // Text Input State
   const [inputMode, setInputMode] = useState<InputMode>('file');
@@ -170,35 +171,13 @@ function App() {
         parsed = await parseImages(inputImages);
       }
 
-      console.log('Parsed response:', parsed);
 
       const newQuestions = parsed.questions || [];
       if (newQuestions.length === 0) {
         throw new Error('No questions found in content');
       }
 
-      // For IMAGE mode: go to content-review for editing first
-      if (inputMode === 'images') {
-        setQuestions(prev => {
-          if (prev.length > 0) {
-            const lastNum = prev[prev.length - 1].number || prev.length;
-            const adjustedNew = newQuestions.map((q: any, idx: number) => ({
-              ...q,
-              number: lastNum + idx + 1
-            }));
-            return [...prev, ...adjustedNew];
-          }
-          return newQuestions;
-        });
-        setInputImages([]);
-        setAppState('content-review');
-        toast.success(`Extracted ${newQuestions.length} questions! Review and edit below.`, { id: 'parse' });
-        return;
-      }
-
-      setAppState('preview');
-      console.log(`📦 Setting up preview for ${newQuestions.length} questions`);
-
+      // All modes now go through content-review for editing before generating slides
       setQuestions(prev => {
         if (prev.length > 0) {
           const lastNum = prev[prev.length - 1].number || prev.length;
@@ -211,22 +190,10 @@ function App() {
         return newQuestions;
       });
 
-      toast.success(`Added ${newQuestions.length} new questions!`, { id: 'parse' });
+      if (inputMode === 'images') setInputImages([]);
 
-      toast.loading('Generating preview...', { id: 'preview' });
-
-      // Defensively check for backgroundFile
-      if (!backgroundFile) {
-        throw new Error('Background file missing. Please upload or select a preset.');
-      }
-
-      const previewImageUrl = await generatePreview(
-        backgroundFile,
-        newQuestions[0], // Use newQuestions directly instead of questions state because state might not have updated yet
-        { ...config, render_badge: false, render_instructor: false, render_subtitle: false }
-      );
-      setPreviewUrl(previewImageUrl);
-      toast.success('Preview ready!', { id: 'preview' });
+      setAppState('content-review');
+      toast.success(`Parsed ${newQuestions.length} question${newQuestions.length !== 1 ? 's' : ''}! Review and edit below.`, { id: 'parse' });
 
     } catch (error: any) {
       console.error('❌ [App] handleProcessContent CRITICAL ERROR:', error);
@@ -252,6 +219,8 @@ function App() {
         renumbered[0],
         { ...config, render_badge: false, render_instructor: false, render_subtitle: false }
       );
+      // Revoke previous blob URL to prevent memory leak
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPreviewUrl(previewImageUrl);
       toast.success('Preview ready!', { id: 'preview' });
     } catch (error: any) {
@@ -402,7 +371,8 @@ function App() {
   // Download PPTX
   const handleDownload = () => {
     if (generatedBlob) {
-      downloadBlob(generatedBlob, 'Lekhaslides_Presentation.pptx');
+      const filename = slideName.trim() ? `${slideName.trim()}.pptx` : 'Lekhaslides_Presentation.pptx';
+      downloadBlob(generatedBlob, filename);
       toast.success('Download started!');
     }
   };
@@ -437,7 +407,8 @@ function App() {
           { ...config, render_badge: false, render_instructor: false, render_subtitle: false },
           controller.signal
         );
-        console.log('Preview updated');
+        // Revoke previous blob URL to prevent memory leak
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
         setPreviewUrl(previewImageUrl);
       } catch (error: any) {
         if (error.name === 'CanceledError' || error.name === 'AbortError') return;
@@ -477,6 +448,19 @@ function App() {
 
       {/* Scrollable Content */}
       <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-8">
+
+        {/* Slide Name */}
+        <div>
+          <label className="text-xs text-gray-400 uppercase font-semibold block mb-2 px-1 tracking-wider">Slide Name</label>
+          <input
+            type="text"
+            value={slideName}
+            onChange={(e) => setSlideName(e.target.value)}
+            placeholder="e.g. QA for CA — Chapter 3"
+            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-gray-200 placeholder-gray-600
+                     focus:outline-none focus:ring-2 focus:ring-accent-mint/40 focus:border-accent-mint/30 transition-all"
+          />
+        </div>
 
         {/* Project Setup Group */}
         <div className="space-y-4">
@@ -735,7 +719,7 @@ function App() {
                 <ParsedContentReview
                   questions={questions}
                   onConfirm={handleConfirmContent}
-                  onAddMoreImages={handleAddMoreImages}
+                  onAddMoreImages={inputMode === 'images' ? handleAddMoreImages : undefined}
                   isParsingMore={isParsingMore}
                 />
               </ErrorBoundary>
