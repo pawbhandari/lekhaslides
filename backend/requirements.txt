@@ -1,1 +1,9 @@
+fastapi
+uvicorn[standard]
 gunicorn
+python-multipart
+python-docx
+python-pptx
+google-generativeai
+Pillow
+aiofiles

@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { ParsedDocxResponse, Question, Config } from '../types';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 const isDev = import.meta.env.DEV;
 
@@ -10,7 +10,7 @@ export const parseDocx = async (file: File): Promise<ParsedDocxResponse> => {
     formData.append('file', file);
 
     if (isDev) console.log(`[API] parseDocx: ${file.name}`);
-    const response = await axios.post<ParsedDocxResponse>(`${API_BASE}/api/parse-docx`, formData);
+    const response = await axios.post<ParsedDocxResponse>(`${API_URL}/api/parse-docx`, formData);
     return response.data;
 };
 
@@ -21,7 +21,7 @@ export const parseImages = async (files: File[]): Promise<ParsedDocxResponse> =>
     });
 
     if (isDev) console.log(`[API] parseImages: ${files.length} images`);
-    const response = await axios.post<ParsedDocxResponse>(`${API_BASE}/api/parse-images`, formData);
+    const response = await axios.post<ParsedDocxResponse>(`${API_URL}/api/parse-images`, formData);
     return response.data;
 };
 
@@ -30,7 +30,7 @@ export const parseText = async (text: string): Promise<ParsedDocxResponse> => {
     formData.append('text', text);
 
     if (isDev) console.log(`[API] parseText: ${text.length} chars`);
-    const response = await axios.post<ParsedDocxResponse>(`${API_BASE}/api/parse-text`, formData);
+    const response = await axios.post<ParsedDocxResponse>(`${API_URL}/api/parse-text`, formData);
     return response.data;
 };
 
@@ -45,7 +45,7 @@ export const generatePreview = async (
     formData.append('question_data', JSON.stringify(questionData));
     formData.append('config', JSON.stringify(config));
 
-    const response = await axios.post(`${API_BASE}/api/generate-preview`, formData, {
+    const response = await axios.post(`${API_URL}/api/generate-preview`, formData, {
         responseType: 'blob',
         signal
     });
@@ -64,7 +64,7 @@ export const generatePPTX = async (
     formData.append('questions_data', JSON.stringify(questionsData));
     formData.append('config', JSON.stringify(config));
 
-    const response = await fetch(`${API_BASE}/api/generate-pptx`, {
+    const response = await fetch(`${API_URL}/api/generate-pptx`, {
         method: 'POST',
         body: formData
     });
@@ -193,7 +193,7 @@ export const generateBatchPreviews = async (
 
     if (isDev) console.log(`[API] batchPreviews: ${questionsData.length} items, page ${page}`);
     const response = await axios.post<import('../types').BatchPreviewResponse>(
-        `${API_BASE}/api/generate-batch-previews`,
+        `${API_URL}/api/generate-batch-previews`,
         formData
     );
     return response.data;

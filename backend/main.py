@@ -64,7 +64,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 # CORS for React frontend
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+ALLOWED_ORIGINS = ["https://lekhaslides-frontend.onrender.com", "http://localhost:5173"]
 
 app.add_middleware(
     CORSMiddleware,
