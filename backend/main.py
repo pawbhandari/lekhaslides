@@ -425,11 +425,16 @@ async def parse_images(files: List[UploadFile] = File(...)):
 
         model = genai.GenerativeModel(
             model_name=model_name,
-            generation_config={"response_mime_type": "application/json"},
+            generation_config={
+                "response_mime_type": "application/json",
+                "temperature": 0.7,
+                "top_p": 0.95,
+                "top_k": 40
+            },
             safety_settings=safety_settings
         )
             
-        logger.info(f"Using {model_name} with structured JSON output for {len(files)} images")
+        logger.info(f"Production AI Call: Using {model_name} (Safety: BLOCK_NONE)")
         
         prompt = """You are an expert OCR and educational content extraction AI. Extract ALL questions from the provided images into structured JSON.
 
