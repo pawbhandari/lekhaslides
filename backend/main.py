@@ -32,18 +32,27 @@ except Exception:
 
 # Configure AI Studio (Google Generative AI)
 CREDENTIALS_PATH = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
 def init_genai():
     try:
+        # Priority 1: Service Account JSON
         if CREDENTIALS_PATH and os.path.exists(CREDENTIALS_PATH):
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = CREDENTIALS_PATH
-            logger.info(f"AI Studio (Gemini) initialized with credentials from env var")
+            logger.info(f"AI Studio (Gemini) initialized with Service Account from env var")
             return True
+        
+        # Priority 2: API Key string (Common for Render/Simple Deployments)
+        elif GOOGLE_API_KEY:
+            genai.configure(api_key=GOOGLE_API_KEY)
+            logger.info(f"AI Studio (Gemini) initialized with API Key")
+            return True
+            
         elif CREDENTIALS_PATH:
             logger.warning(f"Credentials file not found at path from GOOGLE_APPLICATION_CREDENTIALS")
             return False
         else:
-            logger.warning("GOOGLE_APPLICATION_CREDENTIALS env var not set. AI features disabled.")
+            logger.warning("Neither GOOGLE_APPLICATION_CREDENTIALS nor GOOGLE_API_KEY set. AI features disabled.")
             return False
     except Exception as e:
         logger.error(f"Failed to initialize AI Studio: {e}")
