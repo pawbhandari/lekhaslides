@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { Question, Config } from '../types';
 import { generatePreview } from '../services/api';
-import { X, Save, Plus, Trash2, RefreshCw, Image as ImageIcon } from 'lucide-react';
+import { X, Save, Plus, Trash2, RefreshCw, Image } from 'lucide-react';
 import { FileUpload } from './FileUpload';
 
 interface SlideEditorProps {
