@@ -13,6 +13,10 @@ import json
 import base64
 import google.generativeai as genai
 from typing import List, Dict, Optional
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from slide_generator import generate_slide_image, compress_image
 from docx_parser import parse_questions_from_docx, parse_questions_from_md
@@ -39,7 +43,14 @@ def init_genai():
         # Priority 1: Service Account JSON
         if CREDENTIALS_PATH and os.path.exists(CREDENTIALS_PATH):
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = CREDENTIALS_PATH
-            logger.info(f"AI Studio (Gemini) initialized with Service Account from env var")
+            # Debug: verify which account is in the file
+            try:
+                with open(CREDENTIALS_PATH, 'r') as f:
+                    creds_data = json.load(f)
+                    email = creds_data.get('client_email', 'unknown')
+                    logger.info(f"AI Studio (Gemini) initialized with Service Account: {email}")
+            except Exception:
+                logger.info(f"AI Studio (Gemini) initialized with Service Account from path: {CREDENTIALS_PATH}")
             return True
         
         # Priority 2: API Key string (Common for Render/Simple Deployments)
@@ -409,7 +420,7 @@ async def parse_images(files: List[UploadFile] = File(...)):
             generation_config={"response_mime_type": "application/json"}
         )
             
-        logger.info(f"Using {model_name} with structured JSON output")
+        logger.info(f"Using {model_name} with structured JSON output for {len(files)} images")
         
         prompt = """You are an expert OCR and educational content extraction AI. Extract ALL questions from the provided images into structured JSON.
 
@@ -449,8 +460,15 @@ QUESTION TEXT:
             img = Image.open(img_io)
             contents.append(img)
             
-        logger.info(f"Sending {len(files)} images to Gemini API for parsing...")
-        response = model.generate_content(contents)
+        logger.info(f"Sending workflow to Gemini ({model_name})...")
+        
+        # Wrap blocking call in a thread to keep the event loop alive
+        import functools
+        loop = asyncio.get_event_loop()
+        response = await asyncio.wait_for(
+            loop.run_in_executor(None, functools.partial(model.generate_content, contents)),
+            timeout=90
+        )
         
         try:
             result = json.loads(response.text)

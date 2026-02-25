@@ -617,15 +617,25 @@ def generate_slide_image(question: Dict, background: Image.Image,
     should_render_badge = config.get('render_badge', True)
     
     if config.get('badge_text') and should_render_badge:
-        # Badge Size logic
         raw_badge_size = int(config.get('badge_size', 24))
         badge_font_size = int(raw_badge_size * scale)
         
-        # Ratio relative to base 24
-        size_ratio = raw_badge_size / 24.0
-        
-        badge_width = int(350 * scale * size_ratio)
-        badge_height = int(70 * scale * size_ratio)
+        if font_path:
+            badge_font = get_cached_font(font_path, badge_font_size)
+        else:
+            badge_font = font_subtitle
+
+        # Dynamic Badge Size calculation based on actual text
+        try:
+            bbox = badge_font.getbbox(config['badge_text'])
+            text_width = bbox[2] - bbox[0]
+            text_height = (bbox[3] - bbox[1]) or badge_font_size
+        except AttributeError:
+            text_width, text_height = badge_font.getsize(config['badge_text'])
+
+        # Use more compact dynamic width with smaller padding (30 instead of 50)
+        badge_width = int(text_width + 30 * scale)
+        badge_height = int(text_height + 20 * scale)
         
         default_badge_x = TARGET_WIDTH - SAFE_MARGIN_RIGHT - badge_width
         default_badge_y = margin_top
@@ -638,10 +648,6 @@ def generate_slide_image(question: Dict, background: Image.Image,
         
         r_val = config.get('badge_rotation')
         badge_rotation = float(r_val) if r_val is not None else -2.0
-        if font_path:
-            badge_font = get_cached_font(font_path, badge_font_size)
-        else:
-            badge_font = font_subtitle
 
         draw_rotated_badge(bg, config['badge_text'], badge_font, badge_bg, badge_fg, badge_x, badge_y, badge_width, badge_height, badge_rotation)
     
@@ -719,8 +725,8 @@ def generate_slide_image(question: Dict, background: Image.Image,
     # === WATERMARK (Bottom Right) ===
     watermark_text = config.get('watermark_text', '')
     if watermark_text:
-        # Reuse subtitle font or load new one
-        watermark_font = get_cached_font(font_path, int(30 * scale)) if font_path else font_subtitle
+        # Force a smaller watermark size (22 instead of 30)
+        watermark_font = get_cached_font(font_path, int(22 * scale)) if font_path else font_subtitle
         
         # Calculate size
         bbox = draw.textbbox((0, 0), watermark_text, font=watermark_font)
