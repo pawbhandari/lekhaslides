@@ -30,9 +30,9 @@ def create_pptx_from_images(images: List[Image.Image]) -> io.BytesIO:
                 print(f"Converting slide {idx+1} from {img.mode} to RGB")
                 img = img.convert('RGB')
             
-            # Convert PIL image to bytes
+            # Convert PIL image to bytes - Use JPEG for much smaller file sizes
             img_byte_arr = io.BytesIO()
-            img.save(img_byte_arr, format='PNG')
+            img.save(img_byte_arr, format='JPEG', quality=85, optimize=True)
             img_byte_arr.seek(0)
             
             # Add blank slide
