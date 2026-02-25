@@ -25,3 +25,5 @@ backend/*.pyc
 *.log
 *_log.txt
 startup_log.txt
+celtic-origin-*.json
+frontend/celtic-origin-*.json

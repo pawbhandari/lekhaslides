@@ -13,6 +13,8 @@ export interface Config {
     font_size_heading?: number;
     font_size_body?: number;
     font_text_color?: string;
+    font_question_color?: string;
+    font_options_color?: string;
     pos_x?: number;
     pos_y?: number;
     watermark_text?: string;

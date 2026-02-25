@@ -133,16 +133,30 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange }) =>
                         className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-accent-mint"
                     />
                 </div>
-                <div>
-                    <label className="text-xs text-gray-400 uppercase font-semibold block mb-2">Text Color</label>
-                    <div className="flex items-center space-x-3 bg-chalkboard-light p-2 rounded-lg border border-gray-600">
-                        <input
-                            type="color"
-                            value={config.font_text_color || '#F0C83C'}
-                            onChange={handleTextChange('font_text_color')}
-                            className="h-8 w-12 bg-transparent cursor-pointer rounded"
-                        />
-                        <span className="text-sm font-mono text-gray-300 uppercase">{config.font_text_color || '#F0C83C'}</span>
+                <div className="space-y-4">
+                    <div>
+                        <label className="text-xs text-gray-400 uppercase font-semibold block mb-2">Question Color</label>
+                        <div className="flex items-center space-x-3 bg-chalkboard-light p-2 rounded-lg border border-gray-600">
+                            <input
+                                type="color"
+                                value={config.font_question_color || '#F0C83C'}
+                                onChange={handleTextChange('font_question_color')}
+                                className="h-8 w-12 bg-transparent cursor-pointer rounded"
+                            />
+                            <span className="text-sm font-mono text-gray-300 uppercase">{config.font_question_color || '#F0C83C'}</span>
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-xs text-gray-400 uppercase font-semibold block mb-2">Options Color</label>
+                        <div className="flex items-center space-x-3 bg-chalkboard-light p-2 rounded-lg border border-gray-600">
+                            <input
+                                type="color"
+                                value={config.font_options_color || '#F0E6D2'}
+                                onChange={handleTextChange('font_options_color')}
+                                className="h-8 w-12 bg-transparent cursor-pointer rounded"
+                            />
+                            <span className="text-sm font-mono text-gray-300 uppercase">{config.font_options_color || '#F0E6D2'}</span>
+                        </div>
                     </div>
                 </div>
             </Section>

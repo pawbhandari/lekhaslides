@@ -25,7 +25,7 @@ except:
     pass
 
 # Configure AI Studio (Google Generative AI)
-CREDENTIALS_PATH = "/Users/rci/lekhaslides/celtic-origin-480214-d5-e0c80e18c8c5.json"
+CREDENTIALS_PATH = "/Users/rci/lekhaslides/frontend/celtic-origin-480214-d5-ad680edeae1e.json"
 
 def init_genai():
     try:
@@ -161,6 +161,80 @@ async def parse_text(text: str = Form(...)):
         raise HTTPException(status_code=400, detail=f"Error parsing text: {str(e)}")
 
 
+def sanitize_questions(questions: list) -> list:
+    """
+    Post-process AI output to fix common structural mistakes:
+    - LaTeX in the label field (should only be option letter like 'A)')
+    - Empty question text (extract from first option if possible)
+    - Entire option text in label with empty body
+    - Malformed pointers
+    """
+    import re
+
+    # Regex to detect if a string looks like a pure option label: A), B), (A), (a), A., a)
+    LABEL_RE = re.compile(r'^[\(\[]?[A-Ea-e][\)\]\.:]?\)?$')
+    # Detect if something looks like raw LaTeX (starts with $, \\, or contains \frac etc.)
+    LATEX_OR_CONTENT_RE = re.compile(r'(\$|\\frac|\\infty|\\left|\\right|\\alpha|\\leq|\\geq)')
+
+    sanitized = []
+    for q in questions:
+        if not isinstance(q, dict):
+            continue
+
+        number = q.get('number', len(sanitized) + 1)
+        question_text = str(q.get('question', '')).strip()
+        pointers = q.get('pointers', [])
+
+        # Ensure pointers is a list of [label, text] pairs
+        clean_pointers = []
+        for p in pointers:
+            if not isinstance(p, (list, tuple)) or len(p) < 2:
+                continue
+            label = str(p[0]).strip()
+            body  = str(p[1]).strip()
+
+            # Case 1: label looks like LaTeX/content, body is empty
+            # → The AI put the whole option in the label. Move it to body.
+            if LATEX_OR_CONTENT_RE.search(label) and not body:
+                # Try to extract a real label from the start of what's in label
+                m = re.match(r'^([\(\[]?[A-Ea-e][\)\]\.:]\)?)\s*(.*)', label, re.DOTALL)
+                if m:
+                    label = m.group(1).strip()
+                    body = m.group(2).strip()
+                else:
+                    body = label
+                    label = ''
+
+            # Case 2: body contains the label prefix (e.g. body="A) some text", label="")
+            if not label and body:
+                m = re.match(r'^([\(\[]?[A-Ea-e][\)\]\.:]\)?)\s+(.*)', body, re.DOTALL)
+                if m:
+                    label = m.group(1).strip()
+                    body = m.group(2).strip()
+
+            # Case 3: body is empty but label is a valid option letter — skip empty option
+            if label and not body and LABEL_RE.match(label):
+                continue  # skip genuinely empty options
+
+            clean_pointers.append([label, body])
+
+        # If question text is empty, try to infer it from context
+        if not question_text and clean_pointers:
+            # Sometimes the AI puts the question in the first "pointer" with an empty label
+            first_label, first_body = clean_pointers[0]
+            if not first_label and not LABEL_RE.match(first_label):
+                question_text = first_body
+                clean_pointers = clean_pointers[1:]
+
+        sanitized.append({
+            'number': number,
+            'question': question_text,
+            'pointers': clean_pointers,
+        })
+
+    return sanitized
+
+
 @app.post("/api/parse-images")
 async def parse_images(files: List[UploadFile] = File(...)):
     """
@@ -170,59 +244,44 @@ async def parse_images(files: List[UploadFile] = File(...)):
         raise HTTPException(status_code=500, detail="Gemini API not configured on server (Missing credentials).")
 
     try:
-        # Use Gemini 2.5/2.0 Flash (verified in user project list) or fall back
         model_name = "gemini-2.5-flash"
         
-        # Define the Response Schema for 100% reliable parsing
-        response_schema = {
-            "type": "object",
-            "properties": {
-                "questions": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "number": {"type": "integer"},
-                            "question": {"type": "string"},
-                            "pointers": {
-                                "type": "array",
-                                "items": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                    "minItems": 2,
-                                    "maxItems": 2
-                                }
-                            }
-                        },
-                        "required": ["number", "question", "pointers"]
-                    }
-                }
-            },
-            "required": ["questions"]
-        }
-
         model = genai.GenerativeModel(
             model_name=model_name,
             generation_config={"response_mime_type": "application/json"}
         )
             
-        print(f"💡 Using {model_name} with Structured Output (JSON Schema)")
+        print(f"💡 Using {model_name} with structured JSON output")
         
-        # Prepare parts for Gemini
-        prompt = """
-        You are an elite educational content architect. Your task is to perform high-fidelity OCR and structured data extraction from the provided images.
-        
-        CONTENT QUALITY & ACCURACY:
-        1. Extract EVERY question and option with 100% text accuracy.
-        2. The content is primarily MCQs. Ensure each MCQ is perfectly structured.
-        3. If a question spans multiple images or is split, merge it logically.
-        4. Maintain mathematical symbols, punctuation, and proper capitalization.
-        
-        EXTRACTION RULES:
-        - Each image may contain multiple questions (e.g., 5-15). Extract ALL of them.
-        - For MCQs: Place options into the "pointers" array as [label, text] pairs, e.g., ["A)", "Option text"].
-        - If a question is descriptive, break the explanation into concise key points for the "pointers" array.
-        """
+        prompt = """You are an expert OCR and educational content extraction AI. Extract ALL questions from the provided images into structured JSON.
+
+OUTPUT FORMAT: Return a JSON object with a "questions" array. Each question must have:
+- "number": integer (question number)
+- "question": string (the full question text, including any inline math)
+- "pointers": array of [label, text] pairs
+
+CRITICAL RULES FOR MCQ OPTIONS:
+- The "label" (first element) must ONLY be the option letter+bracket, e.g.: "A)", "B)", "C)", "D)"
+- The "text" (second element) is the option content (may contain LaTeX)
+
+CORRECT example:
+  ["A)", "$(-\\infty, -\\frac{10}{3}]$"]
+  ["B)", "$(-\\infty, -\\frac{10}{3})$"]
+
+WRONG (never do this):
+  ["$$(-\\infty, -\\frac{10}{3})$$", ""]   ← LaTeX must NEVER be in the label
+  ["", "A) some text"]                      ← label must not be empty
+
+MATH FORMATTING:
+- Use $...$ for ALL inline math expressions (fractions, inequalities, etc.)
+- Use $$...$$ ONLY for standalone display equations on their own line
+- Ensure \\frac, \\leq, \\geq, \\infty, \\left, \\right etc. are correctly formatted
+
+QUESTION TEXT:
+- Always extract the complete question text into the "question" field
+- The "question" field must NEVER be empty if there is a question present
+- For MCQs, the question field is the stem (everything before A/B/C/D options)
+"""
         
         contents = [prompt]
         
@@ -235,10 +294,8 @@ async def parse_images(files: List[UploadFile] = File(...)):
         print(f"Sending {len(files)} images to Gemini API for parsing...")
         response = model.generate_content(contents)
         
-        # Structured Output ensures valid JSON
         result = json.loads(response.text)
         
-        # Handle both formats: {"questions": [...]} or just [...]
         if isinstance(result, list):
             questions = result
         elif isinstance(result, dict):
@@ -246,16 +303,20 @@ async def parse_images(files: List[UploadFile] = File(...)):
         else:
             questions = []
         
+        # Post-process: fix common AI output mistakes
+        questions = sanitize_questions(questions)
+        
         return {
             "questions": questions,
             "total": len(questions)
         }
         
     except Exception as e:
-        print(f"❌ Error in parse-images (Vertex): {str(e)}")
+        print(f"❌ Error in parse-images: {str(e)}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=400, detail=f"Error parsing images via Gemini API: {str(e)}")
+
 
 
 @app.post("/api/generate-preview")

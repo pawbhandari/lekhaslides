@@ -33,6 +33,15 @@ export const SlideEditor = ({ question, background, config, onSave, onClose }: S
         return () => clearTimeout(timer);
     }, [editedQuestion.image]); // Trigger when image changes
 
+    // Auto-refresh when question text or pointers change (debounced)
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            updatePreview();
+        }, 1200); // Debounce 1.2s to avoid hammering while typing
+
+        return () => clearTimeout(timer);
+    }, [editedQuestion.question, JSON.stringify(editedQuestion.pointers)]);
+
     const updatePreview = async () => {
         setIsLoading(true);
         try {

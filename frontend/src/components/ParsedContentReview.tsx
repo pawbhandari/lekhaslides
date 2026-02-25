@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Trash2, Plus, Edit3, Check, ChevronDown, ChevronUp, ImagePlus, GripVertical } from 'lucide-react';
 import type { Question } from '../types';
+import { MathText } from './MathText';
 
 interface Props {
   questions: Question[];
@@ -14,7 +15,6 @@ export function ParsedContentReview({ questions, onConfirm, onAddMoreImages, isP
     questions.map(q => ({ ...q }))
   );
   const [expandedIndex, setExpandedIndex] = useState<number | null>(0);
-  const [editingField, setEditingField] = useState<{ qIdx: number; field: string; pIdx?: number } | null>(null);
 
   // Sync local state when parent questions change (e.g., after "Add More Images")
   useEffect(() => {
@@ -71,7 +71,6 @@ export function ParsedContentReview({ questions, onConfirm, onAddMoreImages, isP
       };
       return updated;
     });
-    setEditingField({ qIdx, field: 'pointer', pIdx: editableQuestions[qIdx].pointers.length });
   };
 
   const addQuestion = () => {
@@ -82,7 +81,6 @@ export function ParsedContentReview({ questions, onConfirm, onAddMoreImages, isP
       pointers: [['A)', ''] as [string, string]]
     }]);
     setExpandedIndex(editableQuestions.length);
-    setEditingField({ qIdx: editableQuestions.length, field: 'question' });
   };
 
   return (
@@ -122,7 +120,7 @@ export function ParsedContentReview({ questions, onConfirm, onAddMoreImages, isP
                 {q.number}
               </span>
               <p className="text-sm text-gray-200 flex-1 line-clamp-1 font-medium">
-                {q.question || <span className="text-gray-500 italic">Empty question</span>}
+                {q.question ? <MathText text={q.question} /> : <span className="text-gray-500 italic">Empty question</span>}
               </p>
               <span className="text-xs text-gray-500 mr-2">{(q.pointers || []).length} opt</span>
               {expandedIndex === qIdx ? (
@@ -162,13 +160,20 @@ export function ParsedContentReview({ questions, onConfirm, onAddMoreImages, isP
                                    font-bold text-center focus:outline-none focus:border-accent-mint/50 transition-all"
                           placeholder="A)"
                         />
-                        <input
-                          value={pointer[1]}
-                          onChange={(e) => updatePointer(qIdx, pIdx, 1, e.target.value)}
-                          className="flex-1 bg-black/30 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white
-                                   focus:outline-none focus:border-accent-mint/50 focus:ring-1 focus:ring-accent-mint/20 transition-all"
-                          placeholder="Option text..."
-                        />
+                        <div className="flex-1 space-y-1">
+                          <input
+                            value={pointer[1]}
+                            onChange={(e) => updatePointer(qIdx, pIdx, 1, e.target.value)}
+                            className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white
+                                     focus:outline-none focus:border-accent-mint/50 focus:ring-1 focus:ring-accent-mint/20 transition-all"
+                            placeholder="Option text..."
+                          />
+                          {pointer[1].includes('$') && (
+                            <div className="px-1 py-0.5 bg-black/20 rounded text-xs text-accent-mint/60">
+                              <MathText text={pointer[1]} />
+                            </div>
+                          )}
+                        </div>
                         <button
                           onClick={() => removePointer(qIdx, pIdx)}
                           className="w-7 h-7 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 flex items-center justify-center
@@ -235,13 +240,13 @@ export function ParsedContentReview({ questions, onConfirm, onAddMoreImages, isP
         </button>
 
         <button
-          onClick={() => onConfirm(editableQuestions.filter(q => q.question.trim()))}
-          disabled={editableQuestions.filter(q => q.question.trim()).length === 0}
+          onClick={() => onConfirm(editableQuestions.filter(q => q.question?.trim()))}
+          disabled={editableQuestions.filter(q => q.question?.trim()).length === 0}
           className="w-full py-3 rounded-xl bg-gradient-to-r from-accent-mint to-emerald-500 text-black font-bold text-sm
                    flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-accent-mint/20
                    transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]"
         >
-          <Check className="w-4 h-4" /> Confirm & Generate Slides ({editableQuestions.filter(q => q.question.trim()).length})
+          <Check className="w-4 h-4" /> Confirm & Generate Slides ({editableQuestions.filter(q => q.question?.trim()).length})
         </button>
       </div>
     </div>
