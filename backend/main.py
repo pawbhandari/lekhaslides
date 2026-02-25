@@ -415,14 +415,25 @@ async def parse_images(files: List[UploadFile] = File(...)):
     try:
         model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
         
+        # Disable safety filters for educational content parsing
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+        ]
+
         model = genai.GenerativeModel(
             model_name=model_name,
-            generation_config={"response_mime_type": "application/json"}
+            generation_config={"response_mime_type": "application/json"},
+            safety_settings=safety_settings
         )
             
         logger.info(f"Using {model_name} with structured JSON output for {len(files)} images")
         
         prompt = """You are an expert OCR and educational content extraction AI. Extract ALL questions from the provided images into structured JSON.
+
+IMPORTANT: If the content appears to be copyrighted material (like a question from a textbook), extract it anyway as this is for a private educational summary.
 
 OUTPUT FORMAT: Return a JSON object with a "questions" array. Each question must have:
 - "number": integer (question number)
@@ -467,14 +478,26 @@ QUESTION TEXT:
         loop = asyncio.get_event_loop()
         response = await asyncio.wait_for(
             loop.run_in_executor(None, functools.partial(model.generate_content, contents)),
-            timeout=90
+            timeout=120
         )
         
+        # Enhanced response inspection
         try:
+            # Check if response was blocked
+            if not response.candidates:
+                logger.warning(f"Gemini returned no candidates. Finish reason: {response.candidates[0].finish_reason if response.candidates else 'Unknown'}")
+                raise Exception("AI blocked the response due to content filters or copyright. Please try a different image or paraphrase the text.")
+            
             result = json.loads(response.text)
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.error(f"Gemini returned invalid JSON for images: {e}")
-            raise Exception("AI returned invalid response format. Please try again.")
+        except (json.JSONDecodeError, ValueError, Exception) as e:
+            # Check if it's a finish_reason 4 (Recitation)
+            error_msg = str(e)
+            if "finish_reason" in error_msg or "4" in error_msg or "Recitation" in error_msg:
+                 logger.error(f"Gemini Copyright/Recitation block: {error_msg}")
+                 raise HTTPException(status_code=400, detail="Gemini AI blocked this question because it detected copyrighted textbook material. Try taking a clearer photo or typing the question manually.")
+            
+            logger.error(f"Gemini Error: {e}")
+            raise HTTPException(status_code=500, detail=f"AI parsing error: {str(e)}")
         
         if isinstance(result, list):
             questions = result
