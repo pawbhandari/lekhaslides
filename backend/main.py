@@ -638,9 +638,11 @@ async def generate_batch_previews(
             # Use preview_mode=True for faster generation
             
             # Check for per-slide config override
-            current_cfg = cfg.copy()
             if "config_override" in q:
+                current_cfg = cfg.copy()
                 current_cfg.update(q["config_override"])
+            else:
+                current_cfg = cfg
 
             img = generate_slide_image(q, bg_image, current_cfg, preview_mode=True, bg_id=bg_id)
             
@@ -720,9 +722,11 @@ async def generate_pptx(
             # Process each question one by one
             for i, question in enumerate(questions):
                 # Check for per-slide config override
-                current_cfg = cfg.copy()
                 if "config_override" in question:
+                    current_cfg = cfg.copy()
                     current_cfg.update(question["config_override"])
+                else:
+                    current_cfg = cfg
                 
                 # Generate single high-res slide
                 slide_img = generate_slide_image(question, bg_image, current_cfg, bg_id=bg_id)
