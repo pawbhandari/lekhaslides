@@ -7,6 +7,27 @@ import zipfile
 import xml.etree.ElementTree as ET
 from typing import List, Dict
 
+# Pre-compiled regular expressions for performance
+RE_BOLD_ASTERISK = re.compile(r'\*\*(.+?)\*\*')
+RE_BOLD_UNDERSCORE = re.compile(r'__(.+?)__')
+RE_ITALIC_ASTERISK = re.compile(r'\*(.+?)\*')
+
+RE_OPTION = re.compile(r'^[\(\[]?([A-Ea-e]|[1-4])[\)\]\.]\)?\s+(.+)', re.DOTALL)
+RE_OPTION_ALPHA = re.compile(r'^[\(\[]?([A-Ea-e])[\)\]\.]\)?\s+(.*)', re.DOTALL)
+
+RE_QUESTION_FLEXIBLE = re.compile(r'^(?:Question\s*)?(\d+)\s*[:.\)]\s+(.+)', re.IGNORECASE)
+RE_QUESTION_FALLBACK = re.compile(r'^(\d+)\.\s+(.+)')
+RE_QUESTION_PAREN = re.compile(r'^(\d+)\)\s+(.+)')
+
+RE_XML_OPTION_MATCH = re.compile(r'^[A-Ea-e][\)\.]\s')
+RE_XML_NUMBER_MATCH = re.compile(r'^\d+')
+RE_XML_EXPLICIT_NUMBER_MATCH = re.compile(r'^\d+[\.\)]\s')
+
+RE_SLOW_OPTION_MATCH = re.compile(r'^[A-Ea-e][\)\.]')
+RE_SLOW_NUMBER_MATCH = re.compile(r'^\d+')
+RE_SLOW_EXPLICIT_NUMBER_MATCH = re.compile(r'^\d+[\.\)]\s')
+
+
 logger = logging.getLogger("lekhaslides.parser")
 
 def parse_questions_from_docx(file_content: bytes) -> List[Dict]:
@@ -34,9 +55,9 @@ def clean_markdown_artifacts(text: str) -> str:
     Removes bold/italic markers but preserves underscores in words.
     """
     # Remove markdown bold/italic markers (pairs only)
-    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # **bold**
-    text = re.sub(r'__(.+?)__', r'\1', text)        # __bold__
-    text = re.sub(r'\*(.+?)\*', r'\1', text)        # *italic*
+    text = RE_BOLD_ASTERISK.sub(r'\1', text)  # **bold**
+    text = RE_BOLD_UNDERSCORE.sub(r'\1', text)        # __bold__
+    text = RE_ITALIC_ASTERISK.sub(r'\1', text)        # *italic*
     # Don't strip standalone underscores — they appear in variable names
     return text.strip()
 
@@ -47,16 +68,7 @@ def parse_lines(lines_iterator) -> List[Dict]:
     questions = []
     current_q = None
     
-    # Detects MCQ-style option: A), B), (A), (B), A., a), 1), etc.
-    OPTION_RE = re.compile(
-        r'^[\(\[]?([A-Ea-e]|[1-4])[\)\]\.]\)?\s+(.+)',
-        re.DOTALL
-    )
-    # Only matches explicit option label like "A)" "(B)" at start, no digit options
-    OPTION_ALPHA_RE = re.compile(
-        r'^[\(\[]?([A-Ea-e])[\)\]\.]\)?\s+(.*)',
-        re.DOTALL
-    )
+
     
     for text in lines_iterator:
         text = text.strip()
@@ -67,10 +79,10 @@ def parse_lines(lines_iterator) -> List[Dict]:
         
         # Check for Question (Flexible regex: 1., 1), 1:, Question 1:, etc.)
         # Require at least a word after the number to avoid matching option lines like "1) text"
-        match = re.match(r'^(?:Question\s*)?(\d+)\s*[:.\)]\s+(.+)', clean_text, re.IGNORECASE)
+        match = RE_QUESTION_FLEXIBLE.match(clean_text)
         if not match:
             # Fallback: "1. text" style — but only treat as question if number is >= 1 and line is substantial
-            match = re.match(r'^(\d+)\.\s+(.+)', clean_text)
+            match = RE_QUESTION_FALLBACK.match(clean_text)
             
         if match:
             num = int(match.group(1))
@@ -82,7 +94,7 @@ def parse_lines(lines_iterator) -> List[Dict]:
             # because dot-separated items are question numbers.
             if current_q and num in range(1, 5):
                 # Check if original text used ) not . as separator
-                paren_match = re.match(r'^(\d+)\)\s+(.+)', clean_text)
+                paren_match = RE_QUESTION_PAREN.match(clean_text)
                 if paren_match:
                     label = paren_match.group(1)
                     body = paren_match.group(2).strip()
@@ -107,7 +119,7 @@ def parse_lines(lines_iterator) -> List[Dict]:
                 continue
             
             # Check if this looks like an MCQ option: A) ..., (B) ..., A. ...
-            opt_match = OPTION_ALPHA_RE.match(bullet_text)
+            opt_match = RE_OPTION_ALPHA.match(bullet_text)
             if opt_match:
                 label_char = opt_match.group(1).upper()
                 body = opt_match.group(2).strip()
@@ -196,7 +208,7 @@ def fast_parse_xml(file_content: bytes) -> List[Dict]:
 
             # Sub-level auto-numbered items (ilvl > 0) are MCQ options
             if is_auto_numbered and ilvl != "0":
-                if not re.match(r'^[A-Ea-e][\)\.]\s', full_text):
+                if not RE_XML_OPTION_MATCH.match(full_text):
                     option_letter = chr(65 + option_counter)  # A, B, C, D...
                     full_text = f"{option_letter}) {full_text}"
                     option_counter += 1
@@ -206,11 +218,11 @@ def fast_parse_xml(file_content: bytes) -> List[Dict]:
                 
             # If it's auto-numbered at level 0 and doesn't already start with a number
             # prepend a number so the parser identifies it as a question
-            if is_auto_numbered and ilvl == "0" and not re.match(r'^\d+', full_text):
+            if is_auto_numbered and ilvl == "0" and not RE_XML_NUMBER_MATCH.match(full_text):
                 full_text = f"{auto_num_counter}. {full_text}"
                 auto_num_counter += 1
                 option_counter = 0  # Reset option counter for new question
-            elif re.match(r'^\d+[\.\)]\s', full_text):
+            elif RE_XML_EXPLICIT_NUMBER_MATCH.match(full_text):
                 option_counter = 0  # Reset for explicitly numbered questions too
             
             yield full_text
@@ -251,18 +263,18 @@ def slow_parse_fallback(file_content: bytes) -> List[Dict]:
                 
                 # Sub-level items (ilvl > 0) treated as MCQ options
                 if is_auto_numbered and ilvl > 0:
-                    if not re.match(r'^[A-Ea-e][\)\.]', text):
+                    if not RE_SLOW_OPTION_MATCH.match(text):
                         option_letter = chr(65 + option_counter)
                         text = f"{option_letter}) {text}"
                         option_counter += 1
                     yield text
                     continue
 
-                if is_auto_numbered and ilvl == 0 and not re.match(r'^\d+', text):
+                if is_auto_numbered and ilvl == 0 and not RE_SLOW_NUMBER_MATCH.match(text):
                     text = f"{auto_num_counter}. {text}"
                     auto_num_counter += 1
                     option_counter = 0  # Reset option counter for new question
-                elif re.match(r'^\d+[\.\)]\s', text):
+                elif RE_SLOW_EXPLICIT_NUMBER_MATCH.match(text):
                     option_counter = 0  # Reset for explicitly numbered questions
                 
                 yield text
