@@ -401,6 +401,18 @@ def sanitize_questions(questions: list) -> list:
     return sanitized
 
 
+
+def _prepare_image_for_gemini(img_bytes: bytes) -> Image.Image:
+    """Synchronously prepare an image for Gemini (CPU-bound)."""
+    img_io = io.BytesIO(img_bytes)
+    img = Image.open(img_io)
+    img = compress_image(img, max_dimension=1600)
+
+    optimized_io = io.BytesIO()
+    img.save(optimized_io, format='JPEG', quality=80)
+    optimized_io.seek(0)
+    return Image.open(optimized_io)
+
 @app.post("/api/parse-images")
 async def parse_images(files: List[UploadFile] = File(...)):
     """
@@ -467,22 +479,14 @@ QUESTION TEXT:
                 current_batch_num = (i // BATCH_SIZE) + 1
                 contents = [prompt]
                 
-                # Optimistically process batch
+                # Optimistically process batch concurrently to avoid blocking the event loop
+                tasks = []
                 for file in batch_files:
                     img_bytes = await file.read()
-                    img_io = io.BytesIO(img_bytes)
-                    img = Image.open(img_io)
-                    
-                    # Optimization: Compress image before sending to Gemini
-                    img = compress_image(img, max_dimension=1600)
-                    
-                    # Re-save to JPEG bytes to ensure minimal payload
-                    optimized_io = io.BytesIO()
-                    img.save(optimized_io, format='JPEG', quality=80)
-                    optimized_io.seek(0)
-                    optimized_img = Image.open(optimized_io)
-                    
-                    contents.append(optimized_img)
+                    tasks.append(asyncio.to_thread(_prepare_image_for_gemini, img_bytes))
+
+                optimized_images = await asyncio.gather(*tasks)
+                contents.extend(optimized_images)
                 
                 # Call Gemini for this batch
                 try:
@@ -530,6 +534,25 @@ QUESTION TEXT:
 
 
 
+
+def _prepare_preview_background(bg_bytes: bytes):
+    """Synchronously prepare background for single preview (CPU-bound)."""
+    bg_id = hash(bg_bytes[:4096]) & 0xFFFFFFFF
+    bg_image = Image.open(io.BytesIO(bg_bytes))
+    bg_image.load()
+    return bg_image, bg_id
+
+def _generate_single_preview(question, bg_image, cfg, bg_id):
+    """Synchronously generate single preview slide (CPU-bound)."""
+    if "config_override" in question:
+        cfg.update(question["config_override"])
+
+    slide_img = generate_slide_image(question, bg_image, cfg, preview_mode=True, bg_id=bg_id, use_cache=True)
+    img_byte_arr = io.BytesIO()
+    slide_img.convert("RGB").save(img_byte_arr, format='JPEG', quality=85, optimize=False)
+    img_byte_arr.seek(0)
+    return img_byte_arr
+
 @app.post("/api/generate-preview")
 async def generate_preview(
     background: UploadFile = File(...),
@@ -546,28 +569,16 @@ async def generate_preview(
         # Load background image
         bg_bytes = await background.read()
         
-        # Use simple hash for caching
-        bg_id = hash(bg_bytes[:4096]) & 0xFFFFFFFF
-        
-        bg_image = Image.open(io.BytesIO(bg_bytes))
-        bg_image.load()  # Ensure image data is in memory
+        # Prepare background asynchronously
+        bg_image, bg_id = await asyncio.to_thread(_prepare_preview_background, bg_bytes)
         
         # Parse JSON data
         question = json.loads(question_data)
         cfg = json.loads(config)
         logger.info(f"Preview for Q{question.get('number')}: {question.get('question', '')[:50]}")
         
-        # Generate slide
-        # Check for per-slide config override
-        if "config_override" in question:
-            cfg.update(question["config_override"])
-            
-        slide_img = generate_slide_image(question, bg_image, cfg, preview_mode=True, bg_id=bg_id, use_cache=True)
-        
-        # Convert to bytes - Use JPEG for previews (much faster than PNG)
-        img_byte_arr = io.BytesIO()
-        slide_img.convert("RGB").save(img_byte_arr, format='JPEG', quality=85, optimize=False)
-        img_byte_arr.seek(0)
+        # Generate slide asynchronously
+        img_byte_arr = await asyncio.to_thread(_generate_single_preview, question, bg_image, cfg, bg_id)
         logger.info("Preview ready")
         
         return StreamingResponse(img_byte_arr, media_type="image/jpeg")
@@ -580,6 +591,25 @@ async def generate_preview(
         raise HTTPException(status_code=500, detail=f"Error generating preview: {str(e)}")
 
 
+
+
+def _prepare_batch_background(bg_bytes: bytes):
+    """Synchronously prepare background for batch previews (CPU-bound)."""
+    bg_image = Image.open(io.BytesIO(bg_bytes))
+    bg_image.load()
+
+    PREVIEW_MAX_DIM = 640
+    bg_image = compress_image(bg_image, max_dimension=PREVIEW_MAX_DIM)
+
+    img_byte_arr = io.BytesIO()
+    bg_image.save(img_byte_arr, format='JPEG', quality=70)
+    while img_byte_arr.tell() > 1 * 1024 * 1024:
+        img_byte_arr = io.BytesIO()
+        bg_image = bg_image.resize((int(bg_image.width*0.9), int(bg_image.height*0.9)))
+        bg_image.save(img_byte_arr, format='JPEG', quality=60)
+
+    bg_id = id(bg_image)
+    return bg_image, bg_id
 
 @app.post("/api/generate-batch-previews")
 async def generate_batch_previews(
@@ -599,23 +629,7 @@ async def generate_batch_previews(
     try:
         # 1. Load and Aggressively Compress Background for FAST previews
         bg_bytes = await background.read()
-        bg_image = Image.open(io.BytesIO(bg_bytes))
-        bg_image.load()
-        
-        # OPTIMIZATION: Use much smaller resolution for grid previews
-        # 640px instead of 960px = 4x fewer pixels = much faster
-        PREVIEW_MAX_DIM = 640 
-        bg_image = compress_image(bg_image, max_dimension=PREVIEW_MAX_DIM)
-        
-        # Ensure it's under 1MB for fast network transfer
-        img_byte_arr = io.BytesIO()
-        bg_image.save(img_byte_arr, format='JPEG', quality=70)
-        while img_byte_arr.tell() > 1 * 1024 * 1024:
-            img_byte_arr = io.BytesIO()
-            bg_image = bg_image.resize((int(bg_image.width*0.9), int(bg_image.height*0.9)))
-            bg_image.save(img_byte_arr, format='JPEG', quality=60)
-            
-        bg_id = id(bg_image)
+        bg_image, bg_id = await asyncio.to_thread(_prepare_batch_background, bg_bytes)
         
         # 2. Parse Questions
         questions = json.loads(questions_data)
@@ -681,6 +695,34 @@ async def generate_batch_previews(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+def _prepare_pptx_background(bg_content: bytes):
+    """Synchronously prepare background for PPTX generation (CPU-bound)."""
+    bg_image = Image.open(io.BytesIO(bg_content))
+    bg_image.load()  # Crucial: Load pixel data into memory before threading
+    bg_image = compress_image(bg_image) # Compress if too large
+    bg_id = id(bg_image)  # Unique ID for caching
+    return bg_image, bg_id
+
+def _generate_pptx_slide_image(question, bg_image, current_cfg, bg_id):
+    """Synchronously generate slide image and convert to JPEG bytes."""
+    slide_img = generate_slide_image(question, bg_image, current_cfg, bg_id=bg_id)
+    img_byte_arr = io.BytesIO()
+    slide_img.convert('RGB').save(img_byte_arr, format='JPEG', quality=85, optimize=True)
+    img_byte_arr.seek(0)
+    # Explicitly clean up image object
+    del slide_img
+    return img_byte_arr
+
+def _save_pptx_to_base64(prs):
+    """Synchronously save PPTX and convert to base64."""
+    import base64
+    pptx_bytes_io = io.BytesIO()
+    prs.save(pptx_bytes_io)
+    pptx_bytes_io.seek(0)
+    pptx_bytes = pptx_bytes_io.read()
+    return base64.b64encode(pptx_bytes).decode('utf-8')
+
 @app.post("/api/generate-pptx")
 async def generate_pptx(
     background: UploadFile = File(...),
@@ -700,11 +742,8 @@ async def generate_pptx(
     
     async def generate_with_progress():
         try:
-            # Load background and ensure it's in memory
-            bg_image = Image.open(io.BytesIO(bg_content))
-            bg_image.load()  # Crucial: Load pixel data into memory before threading
-            bg_image = compress_image(bg_image) # Compress if too large
-            bg_id = id(bg_image)  # Unique ID for caching
+            # Load background and ensure it's in memory asynchronously
+            bg_image, bg_id = await asyncio.to_thread(_prepare_pptx_background, bg_content)
             
             # Parse data
             questions = json.loads(questions_data)
@@ -729,13 +768,8 @@ async def generate_pptx(
                 if "config_override" in question:
                     current_cfg.update(question["config_override"])
                 
-                # Generate single high-res slide
-                slide_img = generate_slide_image(question, bg_image, current_cfg, bg_id=bg_id)
-                
-                # Convert to JPEG bytes immediately
-                img_byte_arr = io.BytesIO()
-                slide_img.convert('RGB').save(img_byte_arr, format='JPEG', quality=85, optimize=True)
-                img_byte_arr.seek(0)
+                # Generate single high-res slide asynchronously
+                img_byte_arr = await asyncio.to_thread(_generate_pptx_slide_image, question, bg_image, current_cfg, bg_id)
                 
                 # Add to PPTX
                 slide_layout = prs.slide_layouts[6]  # Blank
@@ -747,18 +781,10 @@ async def generate_pptx(
                 progress = {"type": "progress", "current": completed, "total": total, "percent": round((completed/total)*100)}
                 yield f"data: {json.dumps(progress)}\n\n"
                 
-                # Explicitly clean up image object
-                del slide_img
                 img_byte_arr.close()
 
-            # Save final PPTX
-            pptx_bytes_io = io.BytesIO()
-            prs.save(pptx_bytes_io)
-            pptx_bytes_io.seek(0)
-            pptx_bytes = pptx_bytes_io.read()
-            
-            # Encode as base64 for SSE delivery
-            b64_pptx = base64.b64encode(pptx_bytes).decode('utf-8')
+            # Save final PPTX asynchronously
+            b64_pptx = await asyncio.to_thread(_save_pptx_to_base64, prs)
             
             # Send complete event with the file
             yield f"data: {json.dumps({'type': 'complete', 'file': b64_pptx})}\n\n"
