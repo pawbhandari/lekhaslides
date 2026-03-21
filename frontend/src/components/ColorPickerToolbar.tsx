@@ -7,14 +7,14 @@ interface ColorPickerToolbarProps {
 }
 
 const PRESET_COLORS = [
-    '#F0C83C', // Yellow (Default)
-    '#64DCB4', // Mint
-    '#FFB450', // Orange
-    '#F0F5FA', // White
-    '#F28B82', // Red/Pink
-    '#81C995', // Green
-    '#8AB4F8', // Blue
-    '#C58AF9', // Purple
+    '#000000', // Black
+    '#FFFFFF', // White
+    '#FF3B30', // Red
+    '#34C759', // Green
+    '#007AFF', // Blue
+    '#FFCC00', // Yellow
+    '#FF9500', // Orange
+    '#AF52DE', // Purple
 ];
 
 export const ColorPickerToolbar: React.FC<ColorPickerToolbarProps> = ({
@@ -36,12 +36,12 @@ export const ColorPickerToolbar: React.FC<ColorPickerToolbarProps> = ({
                 <button
                     key={c}
                     onClick={() => onChange(c)}
-                    className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-125 ${color === c ? 'border-white scale-110' : 'border-transparent hover:border-white/50'}`}
+                    className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-125 flex-shrink-0 ${color === c ? 'border-white scale-110' : 'border-transparent hover:border-white/50'}`}
                     style={{ backgroundColor: c }}
                 />
             ))}
 
-            <div className="w-px h-6 bg-white/10 mx-1"></div>
+            <div className="w-px h-6 bg-white/10 mx-1 flex-shrink-0"></div>
 
             <div className="relative group">
                 <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-blue-500 to-pink-500 border-2 border-transparent group-hover:border-white/50 cursor-pointer overflow-hidden">
