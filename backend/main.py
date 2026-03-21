@@ -97,8 +97,8 @@ app.add_middleware(
 # Middleware to limit file size (approximate, via Content-Length)
 @app.middleware("http")
 async def limit_upload_size(request: Request, call_next):
-    # Max size: 10MB for images, 5MB for docs
-    MAX_SIZE = 10 * 1024 * 1024 
+    # Max size: 200MB (allow batch of 50 images)
+    MAX_SIZE = 200 * 1024 * 1024 
     
     if request.method == "POST":
         content_length = request.headers.get("content-length")
@@ -113,7 +113,7 @@ async def limit_upload_size(request: Request, call_next):
 
 # Allowed file extensions for document parsing
 ALLOWED_DOC_EXTENSIONS = {'.docx', '.md', '.txt'}
-MAX_IMAGE_UPLOAD_COUNT = 20
+MAX_IMAGE_UPLOAD_COUNT = 50
 
 def extract_text_from_file(content: bytes, filename: str) -> str:
     """
@@ -404,7 +404,7 @@ def sanitize_questions(questions: list) -> list:
 @app.post("/api/parse-images")
 async def parse_images(files: List[UploadFile] = File(...)):
     """
-    Parse multiple images using Gemini API and return structured questions
+    Parse multiple images using Gemini API and return structured questions via StreamingResponse (SSE)
     """
     if not HAS_GENAI:
         raise HTTPException(status_code=500, detail="Gemini API not configured on server (Missing credentials).")
@@ -412,31 +412,28 @@ async def parse_images(files: List[UploadFile] = File(...)):
     if len(files) > MAX_IMAGE_UPLOAD_COUNT:
         raise HTTPException(status_code=400, detail=f"Too many images. Maximum {MAX_IMAGE_UPLOAD_COUNT} images allowed per request.")
 
-    try:
-        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-        
-        # Disable safety filters for educational content parsing
-        safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        ]
+    import functools
+    
+    async def parse_in_batches():
+        try:
+            model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+            safety_settings = [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+            ]
 
-        model = genai.GenerativeModel(
-            model_name=model_name,
-            generation_config={
-                "response_mime_type": "application/json",
-                "temperature": 0.7,
-                "top_p": 0.95,
-                "top_k": 40
-            },
-            safety_settings=safety_settings
-        )
+            model = genai.GenerativeModel(
+                model_name=model_name,
+                generation_config={
+                    "response_mime_type": "application/json",
+                    "temperature": 0.7,
+                },
+                safety_settings=safety_settings
+            )
             
-        logger.info(f"Production AI Call: Using {model_name} (Safety: BLOCK_NONE)")
-        
-        prompt = """You are an expert OCR and educational content extraction AI. Extract ALL questions from the provided images into structured JSON.
+            prompt = """You are an expert OCR and educational content extraction AI. Extract ALL questions from the provided images into structured JSON.
 
 IMPORTANT: If the content appears to be copyrighted material (like a question from a textbook), extract it anyway as this is for a private educational summary.
 
@@ -449,14 +446,6 @@ CRITICAL RULES FOR MCQ OPTIONS:
 - The "label" (first element) must ONLY be the option letter+bracket, e.g.: "A)", "B)", "C)", "D)"
 - The "text" (second element) is the option content (may contain LaTeX)
 
-CORRECT example:
-  ["A)", "$(-\\infty, -\\frac{10}{3}]$"]
-  ["B)", "$(-\\infty, -\\frac{10}{3})$"]
-
-WRONG (never do this):
-  ["$$(-\\infty, -\\frac{10}{3})$$", ""]   ← LaTeX must NEVER be in the label
-  ["", "A) some text"]                      ← label must not be empty
-
 MATH FORMATTING:
 - Use $...$ for ALL inline math expressions (fractions, inequalities, etc.)
 - Use $$...$$ ONLY for standalone display equations on their own line
@@ -467,61 +456,77 @@ QUESTION TEXT:
 - The "question" field must NEVER be empty if there is a question present
 - For MCQs, the question field is the stem (everything before A/B/C/D options)
 """
-        
-        contents = [prompt]
-        
-        for file in files:
-            img_bytes = await file.read()
-            img_io = io.BytesIO(img_bytes)
-            img = Image.open(img_io)
-            contents.append(img)
             
-        logger.info(f"Sending workflow to Gemini ({model_name})...")
-        
-        # Wrap blocking call in a thread to keep the event loop alive
-        import functools
-        loop = asyncio.get_event_loop()
-        response = await asyncio.wait_for(
-            loop.run_in_executor(None, functools.partial(model.generate_content, contents)),
-            timeout=120
-        )
-        
-        # Enhanced response inspection
-        try:
-            # Check if response was blocked
-            if not response.candidates:
-                logger.warning(f"Gemini returned no candidates. Finish reason: {response.candidates[0].finish_reason if response.candidates else 'Unknown'}")
-                raise Exception("AI blocked the response due to content filters or copyright. Please try a different image or paraphrase the text.")
+            # Batch size of 2
+            BATCH_SIZE = 2
+            total_files = len(files)
+            total_batches = (total_files + BATCH_SIZE - 1) // BATCH_SIZE
             
-            result = json.loads(response.text)
-        except (json.JSONDecodeError, ValueError, Exception) as e:
-            # Check if it's a finish_reason 4 (Recitation)
-            error_msg = str(e)
-            if "finish_reason" in error_msg or "4" in error_msg or "Recitation" in error_msg:
-                 logger.error(f"Gemini Copyright/Recitation block: {error_msg}")
-                 raise HTTPException(status_code=400, detail="Gemini AI blocked this question because it detected copyrighted textbook material. Try taking a clearer photo or typing the question manually.")
-            
-            logger.error(f"Gemini Error: {e}")
-            raise HTTPException(status_code=500, detail=f"AI parsing error: {str(e)}")
-        
-        if isinstance(result, list):
-            questions = result
-        elif isinstance(result, dict):
-            questions = result.get("questions", [])
-        else:
-            questions = []
-        
-        # Post-process: fix common AI output mistakes
-        questions = sanitize_questions(questions)
-        
-        return {
-            "questions": questions,
-            "total": len(questions)
-        }
-        
-    except Exception as e:
-        logger.error(f"Error in parse-images: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=400, detail=f"Error parsing images via Gemini API: {str(e)}")
+            for i in range(0, total_files, BATCH_SIZE):
+                batch_files = files[i:i + BATCH_SIZE]
+                current_batch_num = (i // BATCH_SIZE) + 1
+                contents = [prompt]
+                
+                # Optimistically process batch
+                for file in batch_files:
+                    img_bytes = await file.read()
+                    img_io = io.BytesIO(img_bytes)
+                    img = Image.open(img_io)
+                    
+                    # Optimization: Compress image before sending to Gemini
+                    img = compress_image(img, max_dimension=1600)
+                    
+                    # Re-save to JPEG bytes to ensure minimal payload
+                    optimized_io = io.BytesIO()
+                    img.save(optimized_io, format='JPEG', quality=80)
+                    optimized_io.seek(0)
+                    optimized_img = Image.open(optimized_io)
+                    
+                    contents.append(optimized_img)
+                
+                # Call Gemini for this batch
+                try:
+                    loop = asyncio.get_event_loop()
+                    response = await asyncio.wait_for(
+                        loop.run_in_executor(None, functools.partial(model.generate_content, contents)),
+                        timeout=90
+                    )
+                    
+                    if not response.candidates:
+                        logger.warning(f"Batch {current_batch_num} blocked.")
+                        yield f"data: {json.dumps({'type': 'error', 'message': 'AI blocked the response.', 'batch': current_batch_num, 'total_batches': total_batches})}\n\n"
+                        continue
+                    
+                    result = json.loads(response.text)
+                    batch_questions = result.get("questions", []) if isinstance(result, dict) else (result if isinstance(result, list) else [])
+                    batch_questions = sanitize_questions(batch_questions)
+                    
+                    # Yield results for this batch
+                    progress = {
+                        "type": "progress", 
+                        "questions": batch_questions, 
+                        "batch": current_batch_num, 
+                        "total_batches": total_batches,
+                        "images_processed": min(i + BATCH_SIZE, total_files),
+                        "total_images": total_files
+                    }
+                    yield f"data: {json.dumps(progress)}\n\n"
+                    
+                except Exception as e:
+                    logger.error(f"Error parsing batch {current_batch_num}: {e}")
+                    yield f"data: {json.dumps({'type': 'error', 'message': str(e), 'batch': current_batch_num, 'total_batches': total_batches})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+
+        except Exception as e:
+            logger.error(f"Error in parse_images stream: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        parse_in_batches(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    )
 
 
 

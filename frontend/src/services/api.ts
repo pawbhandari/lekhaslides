@@ -15,15 +15,74 @@ export const parseDocx = async (file: File): Promise<ParsedDocxResponse> => {
     return response.data;
 };
 
-export const parseImages = async (files: File[]): Promise<ParsedDocxResponse> => {
+export const parseImages = async (
+    files: File[], 
+    onProgress?: (progressData: ParsedDocxResponse) => void
+): Promise<ParsedDocxResponse> => {
     const formData = new FormData();
     files.forEach((file) => {
         formData.append('files', file);
     });
 
-    if (isDev) console.log(`[API] parseImages: ${files.length} images`);
-    const response = await axios.post<ParsedDocxResponse>(`${API_URL}/api/parse-images`, formData);
-    return response.data;
+    if (isDev) console.log(`[API] parseImages: ${files.length} images (streaming)`);
+    
+    const response = await fetch(`${API_URL}/api/parse-images`, {
+        method: 'POST',
+        body: formData
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Failed to parse images' }));
+        throw new Error(errorData.detail || 'Failed to parse images');
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('No response body');
+
+    const decoder = new TextDecoder();
+    let allQuestions: Question[] = [];
+    let buffer = '';
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || '';
+
+        for (const event of events) {
+            const lines = event.split('\n');
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    try {
+                        const data: ParsedDocxResponse & { type: string; message?: string } = JSON.parse(line.slice(6));
+                        if (data.type === 'progress') {
+                            const newQuestions = data.questions || [];
+                            allQuestions = [...allQuestions, ...newQuestions];
+                            if (onProgress) {
+                                onProgress({
+                                    ...data,
+                                    questions: newQuestions // Individual batch questions
+                                });
+                            }
+                        } else if (data.type === 'error') {
+                            throw new Error(data.message || 'Unknown stream error');
+                        } else if (data.type === 'complete') {
+                            if (isDev) console.log('[API] parseImages: Streaming complete');
+                        }
+                    } catch (e) {
+                        console.warn('SSE parse warning:', e);
+                    }
+                }
+            }
+        }
+    }
+
+    return {
+        questions: allQuestions,
+        total: allQuestions.length
+    };
 };
 
 export const parseText = async (text: string): Promise<ParsedDocxResponse> => {

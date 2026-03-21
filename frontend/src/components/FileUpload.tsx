@@ -4,17 +4,21 @@ import { Upload, X, FileText, Image as ImageIcon } from 'lucide-react';
 interface FileUploadProps {
     label: string;
     accept: string;
-    onFileSelect: (file: File | null) => void;
+    onFileSelect?: (file: File | null) => void;
+    onFilesSelect?: (files: File[]) => void;
     file: File | null;
     icon?: 'document' | 'image';
+    multiple?: boolean;
 }
 
 export const FileUpload: React.FC<FileUploadProps> = ({
     label,
     accept,
     onFileSelect,
+    onFilesSelect,
     file,
-    icon = 'document'
+    icon = 'document',
+    multiple = false
 }) => {
     const [isDragging, setIsDragging] = useState(false);
 
@@ -42,19 +46,29 @@ export const FileUpload: React.FC<FileUploadProps> = ({
 
         const files = e.dataTransfer.files;
         if (files && files.length > 0) {
-            onFileSelect(files[0]);
+            if (multiple && onFilesSelect) {
+                onFilesSelect(Array.from(files));
+            } else if (onFileSelect) {
+                onFileSelect(files[0]);
+            }
         }
-    }, [onFileSelect]);
+    }, [multiple, onFileSelect, onFilesSelect]);
 
     const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;
         if (files && files.length > 0) {
-            onFileSelect(files[0]);
+            if (multiple && onFilesSelect) {
+                onFilesSelect(Array.from(files));
+            } else if (onFileSelect) {
+                onFileSelect(files[0]);
+            }
         }
+        // Reset input so the same files can be selected again if needed
+        e.target.value = '';
     };
 
     const removeFile = () => {
-        onFileSelect(null);
+        if (onFileSelect) onFileSelect(null);
     };
 
     const formatFileSize = (bytes: number) => {
@@ -87,6 +101,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                 onChange={handleFileInput}
                 className="hidden"
                 id={`file-input-${label}`}
+                multiple={multiple}
             />
 
             {!file ? (

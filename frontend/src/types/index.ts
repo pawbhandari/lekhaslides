@@ -52,6 +52,10 @@ export interface Config {
 export interface ParsedDocxResponse {
     questions: Question[];
     total: number;
+    batch?: number;
+    total_batches?: number;
+    images_processed?: number;
+    total_images?: number;
 }
 
 export interface GenerationProgress {

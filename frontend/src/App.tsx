@@ -13,7 +13,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 
 import { parseDocx, parseText, parseImages, generatePreview, generatePPTX, downloadBlob, generateBatchPreviews } from './services/api';
 
-import type { Config, Question, BatchPreviewResponse } from './types';
+import type { Config, Question, BatchPreviewResponse, ParsedDocxResponse } from './types';
 import { Sparkles, RefreshCw, FileText, Upload, LayoutGrid, Image as ImageIcon, X } from 'lucide-react';
 
 type AppState = 'upload' | 'content-review' | 'preview' | 'review' | 'generating' | 'complete';
@@ -101,6 +101,7 @@ function App() {
 
   // Content Review State (for image parsing flow)
   const [isParsingMore, setIsParsingMore] = useState(false);
+  const [parsingMetadata, setParsingMetadata] = useState<ParsedDocxResponse | null>(null);
   const addMoreImagesRef = useRef<HTMLInputElement>(null);
 
   // Container Scale for responsiveness (Preview is scaling down 1920p layout)
@@ -165,35 +166,36 @@ function App() {
           return;
         }
         parsed = await parseDocx(docxFile);
+        const newQuestions = parsed.questions || [];
+        setQuestions(newQuestions);
       } else if (inputMode === 'text') {
         parsed = await parseText(inputText);
+        const newQuestions = parsed.questions || [];
+        setQuestions(newQuestions);
       } else {
-        parsed = await parseImages(inputImages);
+        // Image mode: Streaming results
+        setAppState('content-review');
+        setQuestions([]); // Clear existing if starting fresh
+        setParsingMetadata(null);
+        
+        parsed = await parseImages(inputImages, (progressData) => {
+          setParsingMetadata(progressData);
+          const batch = progressData.questions || [];
+          setQuestions(prev => {
+            const lastNum = prev.length > 0 ? (prev[prev.length - 1].number || prev.length) : 0;
+            const adjustedBatch = batch.map((q, idx) => ({
+              ...q,
+              number: lastNum + idx + 1
+            }));
+            return [...prev, ...adjustedBatch];
+          });
+        });
       }
-
-
-      const newQuestions = parsed.questions || [];
-      if (newQuestions.length === 0) {
-        throw new Error('No questions found in content');
-      }
-
-      // All modes now go through content-review for editing before generating slides
-      setQuestions(prev => {
-        if (prev.length > 0) {
-          const lastNum = prev[prev.length - 1].number || prev.length;
-          const adjustedNew = newQuestions.map((q: any, idx: number) => ({
-            ...q,
-            number: lastNum + idx + 1
-          }));
-          return [...prev, ...adjustedNew];
-        }
-        return newQuestions;
-      });
 
       if (inputMode === 'images') setInputImages([]);
-
+      
       setAppState('content-review');
-      toast.success(`Parsed ${newQuestions.length} question${newQuestions.length !== 1 ? 's' : ''}! Review and edit below.`, { id: 'parse' });
+      toast.success('Parsing complete!', { id: 'parse' });
 
     } catch (error: any) {
       console.error('❌ [App] handleProcessContent CRITICAL ERROR:', error);
@@ -240,26 +242,24 @@ function App() {
     if (!files || files.length === 0) return;
 
     setIsParsingMore(true);
+    setParsingMetadata(null);
     try {
       toast.loading('Parsing new images...', { id: 'parse-more' });
-      const parsed = await parseImages(Array.from(files));
-      const newQuestions = parsed.questions || [];
-
-      if (newQuestions.length === 0) {
-        toast.error('No questions found in those images.', { id: 'parse-more' });
-        return;
-      }
-
-      setQuestions(prev => {
-        const lastNum = prev.length > 0 ? (prev[prev.length - 1].number || prev.length) : 0;
-        const adjustedNew = newQuestions.map((q: any, idx: number) => ({
-          ...q,
-          number: lastNum + idx + 1
-        }));
-        return [...prev, ...adjustedNew];
+      
+      await parseImages(Array.from(files), (progressData) => {
+        setParsingMetadata(progressData);
+        const batch = progressData.questions || [];
+        setQuestions(prev => {
+          const lastNum = prev.length > 0 ? (prev[prev.length - 1].number || prev.length) : 0;
+          const adjustedBatch = batch.map((q, idx) => ({
+            ...q,
+            number: lastNum + idx + 1
+          }));
+          return [...prev, ...adjustedBatch];
+        });
       });
 
-      toast.success(`Added ${newQuestions.length} more questions!`, { id: 'parse-more' });
+      toast.success('Successfully added more questions!', { id: 'parse-more' });
     } catch (error: any) {
       console.error('Error parsing more images:', error);
       toast.error('Failed to parse additional images', { id: 'parse-more' });
@@ -569,13 +569,14 @@ function App() {
                 <label className="text-xs text-gray-400 uppercase font-semibold block px-1">Question Images</label>
                 <div className="grid grid-cols-1 gap-2">
                   <FileUpload
-                    label="Add Question Image"
+                    label="Add Question Images"
                     accept=".jpg,.jpeg,.png"
-                    onFileSelect={(file) => {
-                      if (file) setInputImages(prev => [...prev, file]);
+                    onFilesSelect={(files) => {
+                      setInputImages(prev => [...prev, ...files]);
                     }}
                     file={null}
                     icon="image"
+                    multiple={true}
                   />
 
                   {inputImages.length > 0 && (
@@ -721,6 +722,7 @@ function App() {
                   onConfirm={handleConfirmContent}
                   onAddMoreImages={inputMode === 'images' ? handleAddMoreImages : undefined}
                   isParsingMore={isParsingMore}
+                  parsingMetadata={parsingMetadata}
                 />
               </ErrorBoundary>
             </div>

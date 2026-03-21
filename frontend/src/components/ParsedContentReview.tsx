@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Trash2, Plus, Edit3, Check, ChevronDown, ChevronUp, ImagePlus, GripVertical } from 'lucide-react';
-import type { Question } from '../types';
+import type { Question, ParsedDocxResponse } from '../types';
 import { MathText } from './MathText';
 
 interface Props {
@@ -8,9 +8,10 @@ interface Props {
   onConfirm: (questions: Question[]) => void;
   onAddMoreImages?: () => void;
   isParsingMore: boolean;
+  parsingMetadata?: ParsedDocxResponse | null;
 }
 
-export function ParsedContentReview({ questions, onConfirm, onAddMoreImages, isParsingMore }: Props) {
+export function ParsedContentReview({ questions, onConfirm, onAddMoreImages, isParsingMore, parsingMetadata }: Props) {
   const [editableQuestions, setEditableQuestions] = useState<Question[]>(
     questions.map(q => ({ ...q }))
   );
@@ -97,6 +98,24 @@ export function ParsedContentReview({ questions, onConfirm, onAddMoreImages, isP
               {editableQuestions.length} question{editableQuestions.length !== 1 ? 's' : ''} extracted • Edit before generating slides
             </p>
           </div>
+
+          {parsingMetadata && (
+            <div className="min-w-[240px] hidden md:block">
+              <div className="flex justify-between text-[10px] uppercase tracking-wider font-bold mb-1.5">
+                <span className="text-accent-mint flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-accent-mint animate-pulse" />
+                  Parsing {parsingMetadata.images_processed} / {parsingMetadata.total_images} images
+                </span>
+                <span className="text-gray-500">Batch {parsingMetadata.batch} of {parsingMetadata.total_batches}</span>
+              </div>
+              <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
+                <div 
+                  className="h-full bg-gradient-to-r from-accent-mint to-emerald-500 shadow-[0_0_10px_rgba(100,220,180,0.3)] transition-all duration-500 ease-out"
+                  style={{ width: `${(parsingMetadata.images_processed! / parsingMetadata.total_images!) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
