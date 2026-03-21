@@ -525,6 +525,33 @@ QUESTION TEXT:
 
 
 
+def _generate_preview_sync(bg_bytes: bytes, question_data: str, config: str):
+    """Synchronous helper for generate_preview to be offloaded to a thread."""
+    # Use simple hash for caching
+    bg_id = hash(bg_bytes[:4096]) & 0xFFFFFFFF
+
+    bg_image = Image.open(io.BytesIO(bg_bytes))
+    bg_image.load()  # Ensure image data is in memory
+
+    # Parse JSON data
+    question = json.loads(question_data)
+    cfg = json.loads(config)
+
+    # Generate slide
+    # Check for per-slide config override
+    if "config_override" in question:
+        cfg.update(question["config_override"])
+
+    slide_img = generate_slide_image(question, bg_image, cfg, preview_mode=True, bg_id=bg_id, use_cache=True)
+
+    # Convert to bytes - Use JPEG for previews (much faster than PNG)
+    img_byte_arr = io.BytesIO()
+    slide_img.convert("RGB").save(img_byte_arr, format='JPEG', quality=85, optimize=False)
+    img_byte_arr.seek(0)
+
+    return img_byte_arr, question.get('number'), question.get('question', '')
+
+
 @app.post("/api/generate-preview")
 async def generate_preview(
     background: UploadFile = File(...),
@@ -541,28 +568,12 @@ async def generate_preview(
         # Load background image
         bg_bytes = await background.read()
         
-        # Use simple hash for caching
-        bg_id = hash(bg_bytes[:4096]) & 0xFFFFFFFF
+        # Offload CPU-bound image generation to a thread pool
+        img_byte_arr, q_num, q_text = await asyncio.to_thread(
+            _generate_preview_sync, bg_bytes, question_data, config
+        )
         
-        bg_image = Image.open(io.BytesIO(bg_bytes))
-        bg_image.load()  # Ensure image data is in memory
-        
-        # Parse JSON data
-        question = json.loads(question_data)
-        cfg = json.loads(config)
-        logger.info(f"Preview for Q{question.get('number')}: {question.get('question', '')[:50]}")
-        
-        # Generate slide
-        # Check for per-slide config override
-        if "config_override" in question:
-            cfg.update(question["config_override"])
-            
-        slide_img = generate_slide_image(question, bg_image, cfg, preview_mode=True, bg_id=bg_id, use_cache=True)
-        
-        # Convert to bytes - Use JPEG for previews (much faster than PNG)
-        img_byte_arr = io.BytesIO()
-        slide_img.convert("RGB").save(img_byte_arr, format='JPEG', quality=85, optimize=False)
-        img_byte_arr.seek(0)
+        logger.info(f"Preview for Q{q_num}: {q_text[:50]}")
         logger.info("Preview ready")
         
         return StreamingResponse(img_byte_arr, media_type="image/jpeg")
