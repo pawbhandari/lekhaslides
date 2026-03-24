@@ -516,6 +516,57 @@ function App() {
                 >
                   <img src="/backgrounds/dark_green_shots.png" className="w-full h-full object-cover opacity-70 group-hover:opacity-100 transition-opacity" alt="Dark Green" />
                 </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      const response = await fetch('/backgrounds/omsm.png');
+                      const blob = await response.blob();
+                      const file = new File([blob], "omsm.png", { type: "image/png" });
+                      setBackgroundFile(file);
+                      toast.success("Omniscience preset loaded!");
+                    } catch (e) {
+                      toast.error("Failed to load preset");
+                    }
+                  }}
+                  className="group relative w-16 h-10 rounded-md border border-white/10 hover:border-accent-mint overflow-hidden transition-all hover:shadow-[0_0_10px_rgba(100,220,180,0.3)]"
+                  title="Omniscience Style"
+                >
+                  <img src="/backgrounds/omsm.png" className="w-full h-full object-cover opacity-70 group-hover:opacity-100 transition-opacity" alt="Omniscience" />
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      const response = await fetch('/backgrounds/QaforCa.png');
+                      const blob = await response.blob();
+                      const file = new File([blob], "QaforCa.png", { type: "image/png" });
+                      setBackgroundFile(file);
+                      toast.success("QA for CA preset loaded!");
+                    } catch (e) {
+                      toast.error("Failed to load preset");
+                    }
+                  }}
+                  className="group relative w-16 h-10 rounded-md border border-white/10 hover:border-accent-mint overflow-hidden transition-all hover:shadow-[0_0_10px_rgba(100,220,180,0.3)]"
+                  title="QA for CA Style"
+                >
+                  <img src="/backgrounds/QaforCa.png" className="w-full h-full object-cover opacity-70 group-hover:opacity-100 transition-opacity" alt="QA for CA" />
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      const response = await fetch('/backgrounds/SCM.png');
+                      const blob = await response.blob();
+                      const file = new File([blob], "SCM.png", { type: "image/png" });
+                      setBackgroundFile(file);
+                      toast.success("SCM preset loaded!");
+                    } catch (e) {
+                      toast.error("Failed to load preset");
+                    }
+                  }}
+                  className="group relative w-16 h-10 rounded-md border border-white/10 hover:border-accent-mint overflow-hidden transition-all hover:shadow-[0_0_10px_rgba(100,220,180,0.3)]"
+                  title="SCM Style"
+                >
+                  <img src="/backgrounds/SCM.png" className="w-full h-full object-cover opacity-70 group-hover:opacity-100 transition-opacity" alt="SCM" />
+                </button>
               </div>
             </div>
 
