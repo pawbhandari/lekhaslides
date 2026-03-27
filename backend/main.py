@@ -14,6 +14,7 @@ import base64
 import google.generativeai as genai
 from typing import List, Dict, Optional
 from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Load environment variables from .env file
 load_dotenv()
@@ -623,8 +624,6 @@ async def generate_batch_previews(
     Generate low-res previews for a batch of slides (e.g., 20 at a time).
     Returns list of base64 encoded images.
     """
-    import base64
-    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     try:
         # 1. Load and Aggressively Compress Background for FAST previews
@@ -733,9 +732,6 @@ async def generate_pptx(
     Generate complete PPTX with all slides - Returns Server-Sent Events for progress,
     then the final PPTX as a base64 encoded payload.
     """
-    import base64
-    from fastapi.responses import StreamingResponse
-    from concurrent.futures import ThreadPoolExecutor, as_completed
     
     # Read file immediately to prevent context loss
     bg_content = await background.read()
