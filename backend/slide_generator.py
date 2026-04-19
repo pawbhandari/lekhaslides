@@ -729,7 +729,8 @@ def generate_slide_image(question: Dict, background: Image.Image,
             img_x = TARGET_WIDTH - SAFE_MARGIN_RIGHT - q_image.width
             
         img_y = question_y
-        bg.paste(q_image, (int(img_x), int(img_y)))
+        q_image_rgba = q_image.convert('RGBA')
+        bg.paste(q_image_rgba, (int(img_x), int(img_y)), q_image_rgba)
         
         # Adjust text margin to avoid image
         if 'right' in content_region:

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { Question, Config } from '../types';
 import { generatePreview } from '../services/api';
 import { X, Save, Plus, Trash2, RefreshCw, Smile } from 'lucide-react';
@@ -21,34 +21,10 @@ export const SlideEditor = ({ question, background, config, onSave, onClose, onA
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
 
-    // Generate preview when question changes (debounced?) 
-    // For now, let's trigger efficiently or on load
-    useEffect(() => {
-        updatePreview();
-    }, []); // Initial load
-
-    // Auto-refresh when image is added/removed
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            updatePreview();
-        }, 500); // Debounce 500ms
-
-        return () => clearTimeout(timer);
-    }, [editedQuestion.image]); // Trigger when image changes
-
-    // Auto-refresh when question text or pointers change (debounced)
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            updatePreview();
-        }, 1200); // Debounce 1.2s to avoid hammering while typing
-
-        return () => clearTimeout(timer);
-    }, [editedQuestion.question, JSON.stringify(editedQuestion.pointers)]);
-
-    const updatePreview = async () => {
+    const updatePreview = useCallback(async () => {
         setIsLoading(true);
         try {
-            // Force NO is_preview here so modal shows EVERYTHING
+            // Force NO is_preview here so modal shows EVERYTHING burnt-in
             const url = await generatePreview(background, editedQuestion, { ...config, is_preview: false });
             setPreviewUrl(url);
         } catch (error) {
@@ -56,7 +32,28 @@ export const SlideEditor = ({ question, background, config, onSave, onClose, onA
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [background, editedQuestion, config]);
+
+    // Generate preview when question changes (debounced?)
+    useEffect(() => {
+        updatePreview();
+    }, []); // Initial load only — manual refresh or debounces handle the rest
+
+    // Auto-refresh when image is added/removed
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            updatePreview();
+        }, 500);
+        return () => clearTimeout(timer);
+    }, [editedQuestion.image, updatePreview]);
+
+    // Auto-refresh when question text or pointers change (debounced)
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            updatePreview();
+        }, 1200);
+        return () => clearTimeout(timer);
+    }, [editedQuestion.question, JSON.stringify(editedQuestion.pointers), updatePreview]);
 
     const handlePointerChange = (idx: number, type: 'label' | 'text', value: string) => {
         const newPointers = [...editedQuestion.pointers];
