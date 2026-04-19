@@ -115,8 +115,11 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange }) =>
                             <div className="mt-2 h-[350px]">
                                 <EmojiPicker 
                                     onEmojiClick={(emojiData) => {
-                                        handleChange('global_emoji', emojiData.emoji);
-                                        handleChange('render_global_emoji', true); // Auto-enable when picked
+                                        onChange({ 
+                                            ...config, 
+                                            global_emoji: emojiData.emoji,
+                                            render_global_emoji: true 
+                                        });
                                         setShowEmojiPicker(false);
                                     }}
                                     theme={Theme.DARK}
