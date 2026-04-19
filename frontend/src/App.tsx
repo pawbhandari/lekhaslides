@@ -433,7 +433,7 @@ function App() {
         );
         // Revoke previous blob URL to prevent memory leak
         if (previewUrl) URL.revokeObjectURL(previewUrl);
-        setPreviewUrl(previewImageUrl + `?t=${Date.now()}`);
+        setPreviewUrl(previewImageUrl);
       } catch (error: any) {
         if (error.name === 'CanceledError' || error.name === 'AbortError') return;
         console.error('Error updating preview:', error);
