@@ -35,6 +35,7 @@ export interface Config {
     emoji_y?: number;
     emoji_size?: number;
     emoji_rotation?: number;
+    is_preview?: boolean;
 
     // Card Customizations
     instructor_size?: number;

@@ -48,14 +48,7 @@ export const SlideEditor = ({ question, background, config, onSave, onClose, onA
     const updatePreview = async () => {
         setIsLoading(true);
         try {
-            // Match the main preview: disable backend rendering of draggable elements
-            const previewConfig = {
-                ...config,
-                render_badge: false,
-                render_instructor: false,
-                render_subtitle: false
-            };
-            const url = await generatePreview(background, editedQuestion, previewConfig);
+            const url = await generatePreview(background, editedQuestion, config);
             setPreviewUrl(url);
         } catch (error) {
             console.error("Preview error", error);

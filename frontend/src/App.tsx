@@ -301,7 +301,7 @@ function App() {
     if (!batchPreviews) toast.loading(`Generating previews (Page ${page})...`, { id: 'batch' });
 
     try {
-      const response = await generateBatchPreviews(backgroundFile, questions, config, page, 20);
+      const response = await generateBatchPreviews(backgroundFile, questions, { ...config, is_preview: true }, page, 20);
       setBatchPreviews(response);
       toast.success('Previews updated', { id: 'batch' });
     } catch (error) {
@@ -428,7 +428,7 @@ function App() {
         const previewImageUrl = await generatePreview(
           backgroundFile,
           questions[0],
-          { ...config, render_badge: false, render_instructor: false, render_subtitle: false },
+          { ...config, is_preview: true },
           controller.signal
         );
         // Revoke previous blob URL to prevent memory leak

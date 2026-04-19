@@ -103,7 +103,7 @@ export const generatePreview = async (
     const formData = new FormData();
     formData.append('background', background);
     formData.append('question_data', JSON.stringify(questionData));
-    formData.append('config', JSON.stringify({ ...config, is_preview: true }));
+    formData.append('config', JSON.stringify(config));
 
     const response = await axios.post(`${API_URL}/api/generate-preview`, formData, {
         responseType: 'blob',
