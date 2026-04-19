@@ -9,3 +9,5 @@ google-generativeai
 Pillow
 aiofiles
 matplotlib
+pilmoji
+emoji
