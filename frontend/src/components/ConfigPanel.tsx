@@ -109,6 +109,14 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange }) =>
                             >
                                 {showEmojiPicker ? 'Close' : 'Pick Emoji'}
                             </button>
+                            {config.global_emoji && (
+                                <button
+                                    onClick={() => onChange({ ...config, global_emoji: '', render_global_emoji: false })}
+                                    className="px-3 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-sm font-semibold rounded-lg transition-colors border border-red-500/20"
+                                >
+                                    Clear
+                                </button>
+                            )}
                         </div>
                         
                         {showEmojiPicker && (

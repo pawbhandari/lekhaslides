@@ -583,7 +583,17 @@ def generate_slide_image(question: Dict, background: Image.Image,
             q_image.thumbnail((max_w, max_h), Image.Resampling.LANCZOS)
             
             # Reduce content width if image is present
-            content_width = int(content_width * 0.55)
+            content_width = int(content_width * 0.5)
+            
+            # Intelligently adjust layout: if we have an image, 
+            # we push the text to the opposite side of where the image will be.
+            # Usually image is on the right, so text should be on the left.
+            if 'right' in content_region:
+                # If content is set to right, we'll put image on left
+                margin_left = BASE_MARGIN_LEFT + POS_OFFSET_X
+            else:
+                # Content is full or left, we leave margin_left as is and put image on right
+                pass
         except Exception as e:
             print(f"⚠️ Failed to load question image: {e}")
             q_image = None
@@ -672,12 +682,25 @@ def generate_slide_image(question: Dict, background: Image.Image,
         emoji_size = int(int(config.get('emoji_size', 60)) * scale)
         
         try:
-            emoji_font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", emoji_size)
-        except IOError:
-            try:
-                emoji_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", emoji_size)
-            except:
-                emoji_font = font_heading
+            # Try specific emoji-capable fonts
+            font_list = [
+                "/System/Library/Fonts/Apple Color Emoji.ttc",
+                "/System/Library/Fonts/Supplemental/Arial.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"
+            ]
+            emoji_font = None
+            for fp in font_list:
+                if os.path.exists(fp):
+                    try:
+                        emoji_font = ImageFont.truetype(fp, emoji_size)
+                        break
+                    except: continue
+            
+            if not emoji_font:
+                emoji_font = ImageFont.load_default() # Better than drawing a box with Chalk
+        except:
+            emoji_font = font_heading
             
         emoji_rotation = float(config.get('emoji_rotation', 0.0))
         draw_rotated_text(bg, global_emoji, emoji_font, question_color, emoji_x, emoji_y, emoji_rotation)
@@ -697,11 +720,25 @@ def generate_slide_image(question: Dict, background: Image.Image,
     # Update question_y for image and answer label
     next_y = question_y + q_height
     
-    # Draw question image if present (on the right)
+    # Draw question image if present
     if q_image:
-        img_x = TARGET_WIDTH - SAFE_MARGIN_RIGHT - q_image.width
+        # Intelligently place image: if content is on right, put image on left. vice versa.
+        if 'right' in content_region:
+            img_x = BASE_MARGIN_LEFT
+        else:
+            img_x = TARGET_WIDTH - SAFE_MARGIN_RIGHT - q_image.width
+            
         img_y = question_y
         bg.paste(q_image, (int(img_x), int(img_y)))
+        
+        # Adjust text margin to avoid image
+        if 'right' in content_region:
+            # Shift content_region to avoid image on left?
+            # Actually simplest: if image is on left, just leave it there.
+            pass
+        else:
+            # Image is on right, content_width was already shrunken in pass 1
+            pass
     
     # === ANSWER LABEL ===
     # Use options color for answer label - Reduced gap from 40 to 10
