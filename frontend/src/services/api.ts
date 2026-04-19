@@ -258,3 +258,13 @@ export const generateBatchPreviews = async (
     );
     return response.data;
 };
+
+export const getCredits = async (): Promise<{credits: number}> => {
+    try {
+        const response = await axios.get(`${API_URL}/api/credits`);
+        return response.data;
+    } catch (error) {
+        console.error('Failed to get credits', error);
+        return { credits: 0 };
+    }
+};

@@ -87,6 +87,13 @@ function App() {
   // Questions and preview
   const [questions, setQuestions] = useState<Question[]>([]);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [credits, setCredits] = useState<number | null>(null);
+
+  useEffect(() => {
+    import('./services/api').then(({ getCredits }) => {
+       getCredits().then(res => setCredits(res.credits));
+    });
+  }, []);
 
   // Review & Generation state
   const [appState, setAppState] = useState<AppState>('upload');
@@ -197,6 +204,10 @@ function App() {
       setAppState('content-review');
       toast.success('Parsing complete!', { id: 'parse' });
 
+      import('./services/api').then(({ getCredits }) => {
+         getCredits().then(res => setCredits(res.credits));
+      });
+
     } catch (error: any) {
       console.error('❌ [App] handleProcessContent CRITICAL ERROR:', error);
       const msg = error.response?.data?.detail || error.message || 'Failed to process content. Please try again.';
@@ -260,6 +271,10 @@ function App() {
       });
 
       toast.success('Successfully added more questions!', { id: 'parse-more' });
+
+      import('./services/api').then(({ getCredits }) => {
+         getCredits().then(res => setCredits(res.credits));
+      });
     } catch (error: any) {
       console.error('Error parsing more images:', error);
       toast.error('Failed to parse additional images', { id: 'parse-more' });
@@ -358,6 +373,10 @@ function App() {
       );
       setGeneratedBlob(blob);
 
+      import('./services/api').then(({ getCredits }) => {
+         getCredits().then(res => setCredits(res.credits));
+      });
+
       setAppState('complete');
       toast.success('Slides generated successfully!', { id: 'generate' });
 
@@ -444,6 +463,12 @@ function App() {
           Lekhaslides
         </h1>
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-[0.2em]">Studio Edition</p>
+        {credits !== null && (
+          <div className="mt-4 inline-flex items-center space-x-2 bg-accent-orange/10 px-3 py-1.5 rounded-full border border-accent-orange/20 shadow-sm">
+             <span className="w-2 h-2 rounded-full bg-accent-orange animate-pulse"></span>
+             <span className="text-xs font-bold text-accent-orange tracking-wide">₹{credits !== null ? credits.toFixed(2) : '0.00'} LEFT</span>
+          </div>
+        )}
       </div>
 
       {/* Scrollable Content */}

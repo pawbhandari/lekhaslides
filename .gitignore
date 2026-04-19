@@ -36,3 +36,4 @@ backend/celtic-origin-*.json
 # Credentials - NEVER commit these
 *.json.key
 service-account*.json
+credits.json

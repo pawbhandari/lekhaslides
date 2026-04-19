@@ -111,6 +111,45 @@ async def limit_upload_size(request: Request, call_next):
     response = await call_next(request)
     return response
 
+# Credits system
+CREDITS_FILE = "credits.json"
+
+def get_credits() -> float:
+    if not os.path.exists(CREDITS_FILE):
+        return 500.0
+    try:
+        with open(CREDITS_FILE, "r") as f:
+            data = json.load(f)
+            return float(data.get("left", 500.0))
+    except Exception:
+        return 500.0
+
+def use_credits(amount: float = 0.0):
+    left = get_credits()
+    left = max(0.0, left - amount)
+    try:
+        with open(CREDITS_FILE, "w") as f:
+            json.dump({"left": round(left, 4)}, f)
+    except Exception as e:
+        logger.error(f"Failed to update credits: {e}")
+    return left
+
+def calculate_gemini_cost_inr(usage_metadata) -> float:
+    if not usage_metadata:
+        return 0.13 # Fallback flat rate roughly 0.13 INR
+    try:
+        in_tokens = getattr(usage_metadata, 'prompt_token_count', 0)
+        out_tokens = getattr(usage_metadata, 'candidates_token_count', 0)
+        in_cost_usd = in_tokens * 0.0000003
+        out_cost_usd = out_tokens * 0.0000025
+        return (in_cost_usd + out_cost_usd) * 83.5
+    except Exception:
+        return 0.13
+
+@app.get("/api/credits")
+async def get_credits_endpoint():
+    return {"credits": round(get_credits(), 2)}
+
 # Allowed file extensions for document parsing
 ALLOWED_DOC_EXTENSIONS = {'.docx', '.md', '.txt'}
 MAX_IMAGE_UPLOAD_COUNT = 50
@@ -211,6 +250,12 @@ Here is the text to parse:
         )
     except asyncio.TimeoutError:
         raise Exception("AI parsing timed out after 60 seconds")
+    
+    try:
+        cost = calculate_gemini_cost_inr(getattr(response, 'usage_metadata', None))
+        use_credits(cost)
+    except Exception as e:
+        logger.error(f"Failed to deduct credits: {e}")
     
     # Safely parse AI response
     try:
@@ -504,6 +549,12 @@ QUESTION TEXT:
                     result = json.loads(response.text)
                     batch_questions = result.get("questions", []) if isinstance(result, dict) else (result if isinstance(result, list) else [])
                     batch_questions = sanitize_questions(batch_questions)
+                    
+                    try:
+                        cost = calculate_gemini_cost_inr(getattr(response, 'usage_metadata', None))
+                        use_credits(cost)
+                    except Exception as e:
+                        logger.error(f"Failed to deduct credits: {e}")
                     
                     # Yield results for this batch
                     progress = {
