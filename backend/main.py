@@ -597,6 +597,8 @@ def _generate_single_preview(question, bg_image, cfg, bg_id):
     """Synchronously generate single preview slide (CPU-bound)."""
     if "config_override" in question:
         cfg.update(question["config_override"])
+    # ALWAYS force is_preview=True here — prevents double-rendering of draggable elements
+    cfg['is_preview'] = True
 
     slide_img = generate_slide_image(question, bg_image, cfg, preview_mode=True, bg_id=bg_id, use_cache=True)
     img_byte_arr = io.BytesIO()
@@ -711,6 +713,8 @@ async def generate_batch_previews(
             current_cfg = cfg.copy()
             if "config_override" in q:
                 current_cfg.update(q["config_override"])
+            # Force is_preview=True — prevents double-rendering of draggable elements
+            current_cfg['is_preview'] = True
 
             img = generate_slide_image(q, bg_image, current_cfg, preview_mode=True, bg_id=bg_id)
             
