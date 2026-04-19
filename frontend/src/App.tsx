@@ -433,7 +433,7 @@ function App() {
         );
         // Revoke previous blob URL to prevent memory leak
         if (previewUrl) URL.revokeObjectURL(previewUrl);
-        setPreviewUrl(previewImageUrl);
+        setPreviewUrl(previewImageUrl + `?t=${Date.now()}`);
       } catch (error: any) {
         if (error.name === 'CanceledError' || error.name === 'AbortError') return;
         console.error('Error updating preview:', error);
@@ -861,7 +861,7 @@ function App() {
                       />
 
                       {/* Instructor Card */}
-                      {(config.instructor_name && config.instructor_name.trim() !== '') && (
+                      {(config.instructor_name && config.instructor_name.trim().length > 0) && (
                         <DraggableResizableCard
                           id="instructor"
                           text={config.instructor_name}
@@ -881,7 +881,7 @@ function App() {
                       )}
 
                       {/* Subtitle Card */}
-                      {(config.subtitle && config.subtitle.trim() !== '') && (
+                      {(config.subtitle && config.subtitle.trim().length > 0) && (
                         <DraggableResizableCard
                           id="subtitle"
                           text={config.subtitle}
@@ -901,7 +901,7 @@ function App() {
                       )}
 
                       {/* Badge Card */}
-                      {(config.badge_text && config.badge_text.trim() !== '') && (
+                      {(config.badge_text && config.badge_text.trim().length > 0) && (
                         <DraggableResizableCard
                           id="badge"
                           text={config.badge_text}

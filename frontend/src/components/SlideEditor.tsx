@@ -48,8 +48,9 @@ export const SlideEditor = ({ question, background, config, onSave, onClose, onA
     const updatePreview = async () => {
         setIsLoading(true);
         try {
-            const url = await generatePreview(background, editedQuestion, config);
-            setPreviewUrl(url);
+            // Force NO is_preview here so modal shows EVERYTHING
+            const url = await generatePreview(background, editedQuestion, { ...config, is_preview: false });
+            setPreviewUrl(url + `?t=${Date.now()}`);
         } catch (error) {
             console.error("Preview error", error);
         } finally {
