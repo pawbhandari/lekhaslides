@@ -1,6 +1,7 @@
 import React, { type ChangeEvent } from 'react';
 import type { Config } from '../types';
-import { ChevronDown, Type, Layout, Palette, PenTool } from 'lucide-react';
+import { ChevronDown, Type, Layout, Palette, PenTool, Smile } from 'lucide-react';
+import EmojiPicker, { Theme } from 'emoji-picker-react';
 
 interface ConfigPanelProps {
     config: Config;
@@ -24,7 +25,9 @@ const Section = ({ title, icon: Icon, children, defaultOpen = false }: any) => (
 );
 
 export const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange }) => {
-    const handleChange = (field: keyof Config, value: string | number) => {
+    const [showEmojiPicker, setShowEmojiPicker] = React.useState(false);
+
+    const handleChange = (field: keyof Config, value: string | number | boolean) => {
         onChange({ ...config, [field]: value });
     };
 
@@ -83,6 +86,56 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange }) =>
                         className="input-field mt-1"
                         placeholder="Enter watermark text"
                     />
+                </div>
+            </Section>
+
+            <Section title="Global Emoji" icon={Smile} defaultOpen={false}>
+                <div className="space-y-4">
+                    <div className="p-3 bg-black/20 rounded-xl border border-white/5 space-y-3">
+                        <p className="text-xs text-gray-500 font-medium">Select an emoji. You can drag and resize it in the preview.</p>
+                        <div className="flex items-center space-x-3">
+                            {config.global_emoji ? (
+                                <div className="text-3xl bg-white/5 p-2 rounded-lg border border-white/10 min-w-[50px] text-center relative group">
+                                    {config.global_emoji}
+                                </div>
+                            ) : (
+                                <div className="text-sm text-gray-500 bg-white/5 px-4 py-2 rounded-lg border border-white/10 italic">
+                                    No emoji
+                                </div>
+                            )}
+                            <button
+                                onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                                className="px-3 py-2 bg-white/10 hover:bg-white/20 text-sm font-semibold rounded-lg transition-colors border border-white/10"
+                            >
+                                {showEmojiPicker ? 'Close' : 'Pick Emoji'}
+                            </button>
+                        </div>
+                        
+                        {showEmojiPicker && (
+                            <div className="mt-2 h-[350px]">
+                                <EmojiPicker 
+                                    onEmojiClick={(emojiData) => {
+                                        handleChange('global_emoji', emojiData.emoji);
+                                        handleChange('render_global_emoji', true); // Auto-enable when picked
+                                        setShowEmojiPicker(false);
+                                    }}
+                                    theme={Theme.DARK}
+                                    width="100%"
+                                    height="350px"
+                                />
+                            </div>
+                        )}
+                    </div>
+                    
+                    <label className="flex items-center space-x-3 cursor-pointer pl-1">
+                        <input
+                            type="checkbox"
+                            checked={!!config.render_global_emoji}
+                            onChange={(e) => handleChange('render_global_emoji', e.target.checked)}
+                            className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-accent-yellow focus:ring-accent-yellow"
+                        />
+                        <span className="text-sm text-gray-300 font-medium">Add Emoji to all slides</span>
+                    </label>
                 </div>
             </Section>
 

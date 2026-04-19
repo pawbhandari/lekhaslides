@@ -68,6 +68,8 @@ function App() {
       instructor_rotation: 0,
       subtitle_rotation: 0,
       badge_rotation: -2,
+      emoji_rotation: 0,
+      emoji_size: 60,
 
       // Content layout defaults
       content_region: 'full',
@@ -77,7 +79,7 @@ function App() {
     return { ...defaults, ...savedConfig };
   });
 
-  const [selectedCard, setSelectedCard] = useState<'instructor' | 'subtitle' | 'badge' | null>(null);
+  const [selectedCard, setSelectedCard] = useState<'instructor' | 'subtitle' | 'badge' | 'emoji' | null>(null);
 
   // Save config to localStorage whenever it changes
   useEffect(() => {
@@ -150,6 +152,9 @@ function App() {
       }
       if (id === 'badge') {
         return { ...prev, badge_x: attrs.x, badge_y: attrs.y, badge_size: attrs.fontSize, badge_rotation: attrs.rotation };
+      }
+      if (id === 'emoji') {
+        return { ...prev, emoji_x: attrs.x, emoji_y: attrs.y, emoji_size: attrs.fontSize, emoji_rotation: attrs.rotation };
       }
       return prev;
     });
@@ -856,7 +861,7 @@ function App() {
                       />
 
                       {/* Instructor Card */}
-                      {config.instructor_name && (
+                      {(config.instructor_name && config.instructor_name.trim() !== '') && (
                         <DraggableResizableCard
                           id="instructor"
                           text={config.instructor_name}
@@ -876,7 +881,7 @@ function App() {
                       )}
 
                       {/* Subtitle Card */}
-                      {config.subtitle && (
+                      {(config.subtitle && config.subtitle.trim() !== '') && (
                         <DraggableResizableCard
                           id="subtitle"
                           text={config.subtitle}
@@ -896,7 +901,7 @@ function App() {
                       )}
 
                       {/* Badge Card */}
-                      {config.badge_text && (
+                      {(config.badge_text && config.badge_text.trim() !== '') && (
                         <DraggableResizableCard
                           id="badge"
                           text={config.badge_text}
@@ -913,6 +918,26 @@ function App() {
                           onSelect={() => setSelectedCard('badge')}
                           onChange={(attrs) => handleCardUpdate('badge', attrs)}
                           onColorChange={(c) => setConfig(prev => ({ ...prev, badge_color: c }))}
+                        />
+                      )}
+
+                      {/* Emoji Card */}
+                      {(config.global_emoji && config.render_global_emoji) && (
+                        <DraggableResizableCard
+                          id="emoji"
+                          text={config.global_emoji}
+                          x={config.emoji_x !== undefined ? config.emoji_x : 80}
+                          y={config.emoji_y !== undefined ? config.emoji_y : 200}
+                          fontSize={config.emoji_size || 60}
+                          color={config.font_question_color || '#F0C83C'}
+                          rotation={config.emoji_rotation !== undefined ? config.emoji_rotation : 0}
+                          fontFamily={config.font_family || 'Chalk'}
+
+                          containerScale={containerScale}
+                          isSelected={selectedCard === 'emoji'}
+                          onSelect={() => setSelectedCard('emoji')}
+                          onChange={(attrs) => handleCardUpdate('emoji', attrs)}
+                          onColorChange={() => {}} // Emojis don't naturally change colors via text color easily, but we can allow it
                         />
                       )}
                     </div>
@@ -953,6 +978,10 @@ function App() {
           config={config}
           onSave={handleSaveSlide}
           onClose={() => setEditingSlideIndex(null)}
+          onApplyGlobalEmoji={(emoji) => {
+            setConfig(prev => ({ ...prev, global_emoji: emoji, render_global_emoji: true }));
+            toast.success("Emoji applied to all slides!");
+          }}
         />
       )}
 

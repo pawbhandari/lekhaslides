@@ -29,6 +29,12 @@ export interface Config {
     subtitle_x?: number;
     subtitle_y?: number;
     render_subtitle?: boolean;
+    global_emoji?: string;
+    render_global_emoji?: boolean;
+    emoji_x?: number;
+    emoji_y?: number;
+    emoji_size?: number;
+    emoji_rotation?: number;
 
     // Card Customizations
     instructor_size?: number;

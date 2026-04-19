@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import type { Question, Config } from '../types';
 import { generatePreview } from '../services/api';
-import { X, Save, Plus, Trash2, RefreshCw } from 'lucide-react';
+import { X, Save, Plus, Trash2, RefreshCw, Smile } from 'lucide-react';
 import { FileUpload } from './FileUpload';
+import EmojiPicker, { Theme } from 'emoji-picker-react';
 
 interface SlideEditorProps {
     question: Question;
@@ -10,12 +11,14 @@ interface SlideEditorProps {
     config: Config;
     onSave: (updatedQuestion: Question) => void;
     onClose: () => void;
+    onApplyGlobalEmoji?: (emoji: string) => void;
 }
 
-export const SlideEditor = ({ question, background, config, onSave, onClose }: SlideEditorProps) => {
+export const SlideEditor = ({ question, background, config, onSave, onClose, onApplyGlobalEmoji }: SlideEditorProps) => {
     const [editedQuestion, setEditedQuestion] = useState<Question>(JSON.parse(JSON.stringify(question)));
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
 
     // Generate preview when question changes (debounced?) 
@@ -139,6 +142,66 @@ export const SlideEditor = ({ question, background, config, onSave, onClose }: S
                                 }}
                                 className="w-full h-24 bg-black/20 border border-white/10 rounded-lg p-3 text-sm text-gray-200 focus:outline-none focus:border-accent-mint/50 transition-colors resize-none"
                             />
+                        </div>
+
+                        {/* Slide Emoji Override */}
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                                <label className="text-xs text-gray-400 uppercase font-bold tracking-wider">Slide Emoji</label>
+                                <button
+                                    onClick={() => {
+                                        const newConfig = { ...(editedQuestion.config_override || {}), render_global_emoji: false };
+                                        delete newConfig.global_emoji;
+                                        setEditedQuestion({ ...editedQuestion, config_override: newConfig });
+                                    }}
+                                    className="text-xs text-gray-500 hover:text-red-400 transition-colors"
+                                >
+                                    Clear Emoji
+                                </button>
+                            </div>
+                            <div className="flex items-center space-x-3">
+                                <div className="text-2xl bg-white/5 w-12 h-12 flex items-center justify-center rounded-lg border border-white/10">
+                                    {(editedQuestion.config_override?.global_emoji) || (config.render_global_emoji && config.global_emoji ? config.global_emoji : '❌')}
+                                </div>
+                                <div className="flex space-x-2">
+                                    <button
+                                        onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                                        className="px-3 py-2 bg-white/10 hover:bg-white/20 text-sm font-semibold rounded-lg transition-colors border border-white/10 flex items-center space-x-2"
+                                    >
+                                        <Smile className="w-4 h-4" />
+                                        <span>{showEmojiPicker ? 'Close Picker' : 'Change Emoji'}</span>
+                                    </button>
+                                    {(editedQuestion.config_override?.global_emoji && onApplyGlobalEmoji) && (
+                                        <button
+                                            onClick={() => {
+                                                onApplyGlobalEmoji(editedQuestion.config_override!.global_emoji!);
+                                            }}
+                                            className="px-3 py-2 bg-accent-yellow/10 hover:bg-accent-yellow/20 text-accent-yellow text-sm font-semibold rounded-lg transition-colors border border-accent-yellow/30"
+                                        >
+                                            Apply to Global
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                            
+                            {showEmojiPicker && (
+                                <div className="mt-2 h-[300px]">
+                                    <EmojiPicker 
+                                        onEmojiClick={(emojiData) => {
+                                            const newConfig = { 
+                                                ...(editedQuestion.config_override || {}), 
+                                                global_emoji: emojiData.emoji,
+                                                render_global_emoji: true
+                                            };
+                                            setEditedQuestion({ ...editedQuestion, config_override: newConfig });
+                                            setShowEmojiPicker(false);
+                                        }}
+                                        theme={Theme.DARK}
+                                        width="100%"
+                                        height="300px"
+                                    />
+                                </div>
+                            )}
                         </div>
 
                         {/* Question Image */}

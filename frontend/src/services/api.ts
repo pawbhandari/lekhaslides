@@ -103,7 +103,7 @@ export const generatePreview = async (
     const formData = new FormData();
     formData.append('background', background);
     formData.append('question_data', JSON.stringify(questionData));
-    formData.append('config', JSON.stringify(config));
+    formData.append('config', JSON.stringify({ ...config, is_preview: true }));
 
     const response = await axios.post(`${API_URL}/api/generate-preview`, formData, {
         responseType: 'blob',
@@ -247,7 +247,7 @@ export const generateBatchPreviews = async (
     const formData = new FormData();
     formData.append('background', background);
     formData.append('questions_data', JSON.stringify(questionsData));
-    formData.append('config', JSON.stringify(config));
+    formData.append('config', JSON.stringify({ ...config, is_preview: true }));
     formData.append('page', page.toString());
     formData.append('limit', limit.toString());
 

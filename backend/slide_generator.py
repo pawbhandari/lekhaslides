@@ -8,6 +8,18 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+try:
+    from pilmoji import Pilmoji
+except ImportError:
+    # Fallback to standard ImageDraw if pilmoji isn't installed
+    class Pilmoji:
+        def __init__(self, img):
+            self.draw = ImageDraw.Draw(img)
+        def __enter__(self):
+            return self.draw
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            pass
+
 import threading
 import datetime
 
@@ -68,8 +80,8 @@ def clear_caches():
 def draw_rotated_text(img, text, font, fill_color, x, y, angle):
     """Draw text rotated around its center (CSS-style CW rotation match)"""
     if angle == 0:
-        draw = ImageDraw.Draw(img)
-        draw.text((x, y), text, font=font, fill=fill_color)
+        with Pilmoji(img) as pilmoji:
+            pilmoji.text((x, y), text, font=font, fill=fill_color)
         return
 
     try:
@@ -87,7 +99,8 @@ def draw_rotated_text(img, text, font, fill_color, x, y, angle):
     
     # Draw centered in temp
     cx, cy = temp_img.width // 2, temp_img.height // 2
-    temp_draw.text((cx - w/2, cy - h/2), text, font=font, fill=fill_color)
+    with Pilmoji(temp_img) as pilmoji:
+        pilmoji.text((cx - w/2, cy - h/2), text, font=font, fill=fill_color)
     
     # Rotate (PIL is CCW, CSS is CW, so negate)
     rotated = temp_img.rotate(-angle, expand=True, resample=Image.BICUBIC)
@@ -130,7 +143,8 @@ def draw_rotated_badge(img, text, font, bg_color, fg_color, x, y, width, height,
         text_w, text_h = font.getsize(text)
         
     # Centering text
-    temp_draw.text((cx - text_w/2, cy - text_h/2), text, font=font, fill=fg_color)
+    with Pilmoji(temp_img) as pilmoji:
+        pilmoji.text((cx - text_w/2, cy - text_h/2), text, font=font, fill=fg_color)
     
     # Rotate
     rotated = temp_img.rotate(-angle, expand=True, resample=Image.BICUBIC)
@@ -291,8 +305,9 @@ def draw_text_with_math(draw: ImageDraw.Draw, bg: Image.Image, text: str,
     # Fast path: no math markers and no obvious math symbols
     if '$' not in text and '\\' not in text:
         lines = wrap_text(text, max_width, font, draw)
-        for i, line in enumerate(lines):
-            draw.text((int(x), int(y + i * (font.size * 1.2))), line, font=font, fill=pil_color)
+        with Pilmoji(bg) as pilmoji:
+            for i, line in enumerate(lines):
+                pilmoji.text((int(x), int(y + i * (font.size * 1.2))), line, font=font, fill=pil_color)
         return len(lines) * (font.size * 1.2)
 
     # Split by $$...$$ and $...$
@@ -326,7 +341,8 @@ def draw_text_with_math(draw: ImageDraw.Draw, bg: Image.Image, text: str,
                 current_x += math_img.width + 4
                 line_max_height = max(line_max_height, math_img.height + 4)
             else:
-                draw.text((int(current_x), int(current_y)), formula, font=font, fill=pil_color)
+                with Pilmoji(bg) as pilmoji:
+                    pilmoji.text((int(current_x), int(current_y)), formula, font=font, fill=pil_color)
                 current_x += draw.textlength(formula, font=font)
 
 
@@ -359,7 +375,8 @@ def draw_text_with_math(draw: ImageDraw.Draw, bg: Image.Image, text: str,
             else:
                 # Fallback: draw formula as raw text
                 txt = f"${formula}$"
-                draw.text((int(current_x), int(current_y)), txt, font=font, fill=pil_color)
+                with Pilmoji(bg) as pilmoji:
+                    pilmoji.text((int(current_x), int(current_y)), txt, font=font, fill=pil_color)
                 current_x += draw.textlength(txt, font=font)
 
         else:
@@ -383,7 +400,8 @@ def draw_text_with_math(draw: ImageDraw.Draw, bg: Image.Image, text: str,
                         current_x = float(x)
                         line_max_height = font.size * line_spacing_factor
                     
-                    draw.text((int(current_x), int(current_y)), actual_word, font=font, fill=pil_color)
+                    with Pilmoji(bg) as pilmoji:
+                        pilmoji.text((int(current_x), int(current_y)), actual_word, font=font, fill=pil_color)
                     current_x += w_len
 
     return (current_y - y) + line_max_height
@@ -570,10 +588,10 @@ def generate_slide_image(question: Dict, background: Image.Image,
             print(f"⚠️ Failed to load question image: {e}")
             q_image = None
     
-    # === HEADER ===
-    # Instructor name (top-left)
+    # Instructor (Draggable on frontend)
+    is_preview = config.get('is_preview', False)
     should_render_instructor = config.get('render_instructor', True)
-    if config.get('instructor_name') and should_render_instructor:
+    if config.get('instructor_name') and should_render_instructor and not is_preview:
         ins_x = int(config['instructor_x']) * scale if 'instructor_x' in config else margin_left
         ins_y = int(config['instructor_y']) * scale if 'instructor_y' in config else margin_top
         
@@ -584,19 +602,15 @@ def generate_slide_image(question: Dict, background: Image.Image,
         else:
              ins_font = font_heading
 
-        ins_color = config.get('instructor_color')
-        if not ins_color:
-             fill = question_color
-        else:
-             fill = ins_color # Hex or name
+        fill = config.get('instructor_color', question_color)
 
         r_val = config.get('instructor_rotation')
         ins_rotation = float(r_val) if r_val is not None else 0.0
         draw_rotated_text(bg, config['instructor_name'], ins_font, fill, ins_x, ins_y, ins_rotation)
     
-    # Subtitle (below name)
+    # Subtitle (Draggable on frontend)
     should_render_subtitle = config.get('render_subtitle', True)
-    if config.get('subtitle') and should_render_subtitle:
+    if config.get('subtitle') and should_render_subtitle and not is_preview:
         sub_x = int(config['subtitle_x']) * scale if 'subtitle_x' in config else margin_left
         sub_y = int(config['subtitle_y']) * scale if 'subtitle_y' in config else (margin_top + FONT_SIZE_HEADING + 10 * scale)
         
@@ -606,17 +620,17 @@ def generate_slide_image(question: Dict, background: Image.Image,
         else:
              sub_font = font_subtitle
              
-        sub_color = config.get('subtitle_color', o_color_hex) # Use options hex or similar
+        sub_color = config.get('subtitle_color', o_color_hex)
         
         r_val = config.get('subtitle_rotation')
         sub_rotation = float(r_val) if r_val is not None else 0.0
         draw_rotated_text(bg, config['subtitle'], sub_font, sub_color, sub_x, sub_y, sub_rotation)
 
     
-    # Badge (Positioned)
+    # Badge (Draggable on frontend)
     should_render_badge = config.get('render_badge', True)
     
-    if config.get('badge_text') and should_render_badge:
+    if config.get('badge_text') and should_render_badge and not is_preview:
         raw_badge_size = int(config.get('badge_size', 24))
         badge_font_size = int(raw_badge_size * scale)
         
@@ -625,7 +639,7 @@ def generate_slide_image(question: Dict, background: Image.Image,
         else:
             badge_font = font_subtitle
 
-        # Dynamic Badge Size calculation based on actual text
+        # Dynamic Badge Size
         try:
             bbox = badge_font.getbbox(config['badge_text'])
             text_width = bbox[2] - bbox[0]
@@ -633,7 +647,6 @@ def generate_slide_image(question: Dict, background: Image.Image,
         except AttributeError:
             text_width, text_height = badge_font.getsize(config['badge_text'])
 
-        # Use more compact dynamic width with smaller padding (30 instead of 50)
         badge_width = int(text_width + 30 * scale)
         badge_height = int(text_height + 20 * scale)
         
@@ -645,17 +658,36 @@ def generate_slide_image(question: Dict, background: Image.Image,
         
         badge_bg = config.get('badge_bg_color', ORANGE)
         badge_fg = config.get('badge_color', DARK)
-        
         r_val = config.get('badge_rotation')
         badge_rotation = float(r_val) if r_val is not None else -2.0
 
         draw_rotated_badge(bg, config['badge_text'], badge_font, badge_bg, badge_fg, badge_x, badge_y, badge_width, badge_height, badge_rotation)
+
+    # Emoji (Draggable on frontend)
+    global_emoji = config.get('global_emoji')
+    render_global_emoji = config.get('render_global_emoji', True)
+    if global_emoji and render_global_emoji and not is_preview:
+        emoji_x = int(config.get('emoji_x', margin_left)) * scale
+        emoji_y = int(config.get('emoji_y', margin_top + FONT_SIZE_HEADING + 30 * scale)) * scale
+        emoji_size = int(int(config.get('emoji_size', 60)) * scale)
+        
+        try:
+            emoji_font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", emoji_size)
+        except IOError:
+            try:
+                emoji_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", emoji_size)
+            except:
+                emoji_font = font_heading
+            
+        emoji_rotation = float(config.get('emoji_rotation', 0.0))
+        draw_rotated_text(bg, global_emoji, emoji_font, question_color, emoji_x, emoji_y, emoji_rotation)
     
     # === QUESTION ===
 
     # Position question below header (approx 200px gap in original, let's make it relative)
     question_y = margin_top + FONT_SIZE_HEADING + 100 * scale
-    question_text = f"\u2192 {question.get('question', '')}"
+    
+    question_text = f" {question.get('question', '')}"
     
     # Use the new rich text drawer with question color
     # Increased line_spacing_factor to 1.3 to give more space between question lines
